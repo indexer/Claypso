@@ -23,20 +23,24 @@ type Project struct {
 	Path      string `json:"path"` // absolute
 	Vars      []Var  `json:"vars"`
 	UpdatedAt string `json:"updated_at"`
+
+	keyIndex map[string]int `json:"-"` // lazy, key → index in Vars
 }
 
-func (p *Project) indexOf(key string) int {
-	for i, v := range p.Vars {
-		if v.Key == key {
-			return i
-		}
+func (p *Project) buildIndex() {
+	if p.keyIndex != nil {
+		return
 	}
-	return -1
+	p.keyIndex = make(map[string]int, len(p.Vars))
+	for i, v := range p.Vars {
+		p.keyIndex[v.Key] = i
+	}
 }
 
 // Get returns the value for a key and whether it exists.
 func (p *Project) Get(key string) (string, bool) {
-	if i := p.indexOf(key); i >= 0 {
+	p.buildIndex()
+	if i, ok := p.keyIndex[key]; ok {
 		return p.Vars[i].Value, true
 	}
 	return "", false
@@ -44,20 +48,30 @@ func (p *Project) Get(key string) (string, bool) {
 
 // Set inserts or updates a key, preserving insertion order for existing keys.
 func (p *Project) Set(key, value string) {
-	if i := p.indexOf(key); i >= 0 {
+	p.buildIndex()
+	if i, ok := p.keyIndex[key]; ok {
 		p.Vars[i].Value = value
 		return
 	}
+	p.keyIndex[key] = len(p.Vars)
 	p.Vars = append(p.Vars, Var{Key: key, Value: value})
 }
 
 // Unset removes a key. Returns true if it existed.
 func (p *Project) Unset(key string) bool {
-	i := p.indexOf(key)
-	if i < 0 {
+	p.buildIndex()
+	i, ok := p.keyIndex[key]
+	if !ok {
 		return false
 	}
-	p.Vars = append(p.Vars[:i], p.Vars[i+1:]...)
+	n := len(p.Vars) - 1
+	delete(p.keyIndex, key)
+	if i < n {
+		// Swap with last to avoid O(n) compaction; update the swapped element's index.
+		p.Vars[i] = p.Vars[n]
+		p.keyIndex[p.Vars[i].Key] = i
+	}
+	p.Vars = p.Vars[:n]
 	return true
 }
 

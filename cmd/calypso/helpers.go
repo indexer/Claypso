@@ -113,5 +113,13 @@ func maybeMask(val string, reveal bool) string {
 	if len(val) <= 4 {
 		return "****"
 	}
-	return val[:2] + strings.Repeat("*", len(val)-4) + val[len(val)-2:]
+	var b strings.Builder
+	middle := len(val) - 4
+	b.Grow(len(val))
+	b.WriteString(val[:2])
+	for i := 0; i < middle; i++ {
+		b.WriteByte('*')
+	}
+	b.WriteString(val[len(val)-2:])
+	return b.String()
 }

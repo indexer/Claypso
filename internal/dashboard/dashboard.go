@@ -85,8 +85,9 @@ func serveUntilSignal(srv *http.Server, ln net.Listener) error {
 }
 
 func buildView(v VaultReader) viewData {
-	var pvs []projectView
-	for _, name := range v.Names() {
+	names := v.Names()
+	pvs := make([]projectView, 0, len(names))
+	for _, name := range names {
 		p, err := v.Project(name)
 		if err != nil {
 			continue

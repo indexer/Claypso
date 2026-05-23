@@ -145,7 +145,7 @@ func (v *Vault) writeUnlocked(ctx context.Context, path string, passphrase []byt
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	plain, err := json.MarshalIndent(v, "", "  ")
+	plain, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}

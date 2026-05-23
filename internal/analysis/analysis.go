@@ -75,7 +75,7 @@ func Diff(v VaultReader, nameA, nameB string) ([]DiffEntry, error) {
 	}
 	sort.Strings(sorted)
 
-	var out []DiffEntry
+	out := make([]DiffEntry, 0, len(keys))
 	for _, k := range sorted {
 		va, inA := a.Get(k)
 		vb, inB := b.Get(k)
@@ -152,16 +152,16 @@ func FindGaps(v VaultReader) []Gap {
 	}
 
 	var gaps []Gap
+	// Pre-sort each key's project list once, not N times in the inner loop.
+	for _, projs := range keyProjects {
+		sort.Strings(projs)
+	}
 	for _, name := range all {
 		myKeys := projectKeySet[name]
 		for key, projs := range keyProjects {
-			if len(projs) < 2 {
+			if len(projs) < 2 || myKeys[key] {
 				continue
 			}
-			if myKeys[key] {
-				continue
-			}
-			sort.Strings(projs)
 			gaps = append(gaps, Gap{Project: name, Key: key, DefinedIn: projs})
 		}
 	}
