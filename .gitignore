@@ -1,0 +1,7 @@
+/calypso
+*.enc
+*.tmp
+*.lock
+.env
+.claude/
+*.swp

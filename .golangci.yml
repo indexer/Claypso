@@ -1,0 +1,32 @@
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosec
+    - misspell
+    - gofmt
+    - goimports
+  disable:
+    - exhaustruct
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck
+
+linters-settings:
+  gosec:
+    excludes:
+      - G204  # subprocess launching (we use exec for wipe + keychain)
+  errcheck:
+    check-blank: true

@@ -1,0 +1,52 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>calypso</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+         background:#0d1117; color:#c9d1d9; margin:0; padding:32px; }
+  h1 { font-size:20px; color:#58a6ff; margin:0 0 4px; }
+  .sub { color:#8b949e; margin:0 0 28px; }
+  h2 { font-size:14px; text-transform:uppercase; letter-spacing:.08em;
+       color:#8b949e; margin:32px 0 12px; }
+  table { border-collapse:collapse; width:100%; margin-bottom:8px; }
+  th,td { text-align:left; padding:8px 12px; border-bottom:1px solid #21262d; }
+  th { color:#8b949e; font-weight:600; }
+  .pill { display:inline-block; background:#1f6feb22; color:#58a6ff;
+          border:1px solid #1f6feb55; border-radius:10px; padding:1px 8px;
+          margin:1px; font-size:12px; }
+  .gap { color:#f0883e; }
+  .ok  { color:#3fb950; }
+  .path { color:#8b949e; font-size:12px; }
+</style></head><body>
+  <h1>calypso</h1>
+  <p class="sub">Local encrypted env manager · read-only view · values are never shown here</p>
+
+  <h2>Projects ({{len .Projects}})</h2>
+  <table>
+    <tr><th>Project</th><th>Vars</th><th>Updated</th><th>.env path</th></tr>
+    {{range .Projects}}
+    <tr><td>{{.Name}}</td><td>{{.VarCount}}</td><td>{{.UpdatedAt}}</td>
+        <td class="path">{{.Path}}</td></tr>
+    {{end}}
+  </table>
+
+  <h2>Missing-value gaps ({{len .Gaps}})</h2>
+  {{if .Gaps}}
+  <table>
+    <tr><th>Project</th><th class="gap">Missing key</th><th>Defined in</th></tr>
+    {{range .Gaps}}
+    <tr><td>{{.Project}}</td><td class="gap">{{.Key}}</td>
+        <td>{{range .DefinedIn}}<span class="pill">{{.}}</span>{{end}}</td></tr>
+    {{end}}
+  </table>
+  {{else}}<p class="ok">No gaps — every shared key is present everywhere.</p>{{end}}
+
+  <h2>Key matrix ({{len .Matrix}} unique keys)</h2>
+  <table>
+    <tr><th>Key</th><th>Used in</th></tr>
+    {{range .Matrix}}
+    <tr><td>{{.Key}}</td>
+        <td>{{range .Projects}}<span class="pill">{{.}}</span>{{end}}</td></tr>
+    {{end}}
+  </table>
+</body></html>
