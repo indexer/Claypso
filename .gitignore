@@ -1,7 +1,9 @@
 /calypso
+/calypso.exe
 *.enc
 *.tmp
 *.lock
 .env
 .claude/
 *.swp
+dist/
