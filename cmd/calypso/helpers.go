@@ -4,12 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"golang.org/x/term"
 	"io"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
-	"golang.org/x/term"
 )
 
 // clearBytes securely zeroes a byte slice in memory.

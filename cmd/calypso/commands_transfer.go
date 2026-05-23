@@ -3,8 +3,8 @@ package main
 import (
 	"encoding/base64"
 	"fmt"
-	"os"
 	"github.com/spf13/cobra"
+	"os"
 )
 
 func exportCmd() *cobra.Command {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"text/tabwriter"
+
 	"github.com/spf13/cobra"
 	"github.com/yemon/calypso/internal/analysis"
 	"github.com/yemon/calypso/internal/dashboard"
@@ -14,7 +15,7 @@ import (
 func listCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
-		Short: "List all registered projects",
+		Short: "List all registered projects and their environments",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			v, pw, err := openVault(cmd.Context())
 			if err != nil {
@@ -26,10 +27,13 @@ func listCmd() *cobra.Command {
 				return nil
 			}
 			w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-			fmt.Fprintln(w, "PROJECT\tVARS\tUPDATED\tPATH")
+			fmt.Fprintln(w, "PROJECT\tENV\tVARS\tUPDATED\tPATH")
 			for _, name := range v.Names() {
 				p := v.Projects[name]
-				fmt.Fprintf(w, "%s\t%d\t%s\t%s\n", p.Name, len(p.Vars), p.UpdatedAt, p.Path)
+				for _, en := range p.EnvNames() {
+					e := p.Envs[en]
+					fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\n", p.Name, e.Name, len(e.Vars), e.UpdatedAt, e.Path)
+				}
 			}
 			return w.Flush()
 		},
@@ -39,9 +43,9 @@ func listCmd() *cobra.Command {
 func pullCmd() *cobra.Command {
 	var safe, example bool
 	cmd := &cobra.Command{
-		Use:   "pull <project> [-- command...]",
-		Short: "Write the vault's values out to the project's .env file",
-		Long: `pull writes variables from the vault to the project's .env file.
+		Use:   "pull <project[@env]> [-- command...]",
+		Short: "Write the env's values out to its .env file",
+		Long: `pull writes variables from the vault to the env's .env file.
 
 With --safe, values are replaced with placeholders (****) so you can share
 the .env with an LLM or teammate without exposing real secrets.
@@ -58,7 +62,7 @@ Flags:
   -e, --example   write empty values (.env.example template)`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			projectName := args[0]
+			spec := args[0]
 			wipeCmd := args[1:]
 
 			v, pw, err := openVault(cmd.Context())
@@ -66,31 +70,31 @@ Flags:
 				return err
 			}
 			clearBytes(pw)
-			p, err := v.Project(projectName)
+			_, e, err := v.ResolveEnv(spec)
 			if err != nil {
 				return err
 			}
 
 			switch {
 			case example:
-				if err := project.WriteExampleEnvFile(p.Path, p.Vars); err != nil {
+				if err := project.WriteExampleEnvFile(e.Path, e.Vars); err != nil {
 					return err
 				}
-				fmt.Printf("Wrote %d key(s) (empty) to %s\n", len(p.Vars), p.Path)
+				fmt.Printf("Wrote %d key(s) (empty) to %s\n", len(e.Vars), e.Path)
 				return nil
 			case safe:
-				if err := project.WriteSafeEnvFile(p.Path, p.Vars); err != nil {
+				if err := project.WriteSafeEnvFile(e.Path, e.Vars); err != nil {
 					return err
 				}
-				fmt.Printf("Wrote %d safe variable(s) to %s\n", len(p.Vars), p.Path)
+				fmt.Printf("Wrote %d safe variable(s) to %s\n", len(e.Vars), e.Path)
 				return nil
 			case len(wipeCmd) > 0:
-				return wipeAndRun(p.Path, p.Vars, wipeCmd)
+				return wipeAndRun(e.Path, e.Vars, wipeCmd)
 			default:
-				if err := project.WriteEnvFile(p.Path, p.Vars); err != nil {
+				if err := project.WriteEnvFile(e.Path, e.Vars); err != nil {
 					return err
 				}
-				fmt.Printf("Wrote %d variable(s) to %s\n", len(p.Vars), p.Path)
+				fmt.Printf("Wrote %d variable(s) to %s\n", len(e.Vars), e.Path)
 				return nil
 			}
 		},
@@ -130,8 +134,8 @@ func wipeAndRun(envPath string, vars []project.Var, command []string) error {
 func pushCmd() *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
-		Use:   "push <project>",
-		Short: "Read the project's .env file back into the vault",
+		Use:   "push <project[@env]>",
+		Short: "Read the env's .env file back into the vault",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -140,17 +144,17 @@ func pushCmd() *cobra.Command {
 				return err
 			}
 			defer clearBytes(pw)
-			p, err := v.Project(args[0])
+			p, e, err := v.ResolveEnv(args[0])
 			if err != nil {
 				return err
 			}
-			vars, err := project.ReadEnvFile(p.Path)
+			vars, err := project.ReadEnvFile(e.Path)
 			if err != nil {
-				return fmt.Errorf("reading %s: %w", p.Path, err)
+				return fmt.Errorf("reading %s: %w", e.Path, err)
 			}
 
-			if !force && len(p.Vars) > 0 {
-				showPushDiff(p, vars)
+			if !force && len(e.Vars) > 0 {
+				showPushDiff(p.Name, e, vars)
 				ok, err := confirmYesNo(os.Stderr, "Overwrite vault values with .env?", false)
 				if err != nil {
 					return err
@@ -160,12 +164,13 @@ func pushCmd() *cobra.Command {
 				}
 			}
 
-			p.Vars = vars
-			v.Touch(args[0])
+			e.Vars = vars
+			e.InvalidateIndex()
+			v.Touch(p.Name, e.Name)
 			if err := v.Save(ctx, vaultPath, pw); err != nil {
 				return err
 			}
-			fmt.Printf("Imported %d variable(s) from %s into %q.\n", len(vars), p.Path, args[0])
+			fmt.Printf("Imported %d variable(s) from %s into %s@%s.\n", len(vars), e.Path, p.Name, e.Name)
 			return nil
 		},
 	}
@@ -173,9 +178,9 @@ func pushCmd() *cobra.Command {
 	return cmd
 }
 
-func showPushDiff(p *project.Project, incoming []project.Var) {
-	c := analysis.DiffCounts(p.Vars, incoming)
-	fmt.Printf("Changes in %q:\n", p.Name)
+func showPushDiff(projectName string, e *project.Environment, incoming []project.Var) {
+	c := analysis.DiffCounts(e.Vars, incoming)
+	fmt.Printf("Changes in %s@%s:\n", projectName, e.Name)
 	fmt.Printf("  +%d added  ~%d changed  -%d removed  =%d unchanged\n",
 		c.Added, c.Changed, c.Removed, c.Unchanged)
 }
@@ -183,8 +188,8 @@ func showPushDiff(p *project.Project, incoming []project.Var) {
 func diffCmd() *cobra.Command {
 	var reveal bool
 	cmd := &cobra.Command{
-		Use:   "diff <projectA> <projectB>",
-		Short: "Compare the environments of two projects",
+		Use:   "diff <A[@env]> <B[@env]>",
+		Short: "Compare two environments (same or different projects)",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			v, pw, err := openVault(cmd.Context())
@@ -218,29 +223,58 @@ func diffCmd() *cobra.Command {
 	return cmd
 }
 
+// gapsCmd shows both cross-project gaps (key missing in one project's env
+// when other projects' same-named env have it) and intra-project gaps
+// (key in one env of a project but missing from its sibling envs).
 func gapsCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "gaps",
-		Short: "Find keys that some projects have but others are missing",
+		Short: "Find keys that some envs have but others are missing",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			v, pw, err := openVault(cmd.Context())
 			if err != nil {
 				return err
 			}
 			clearBytes(pw)
-			gaps := analysis.FindGaps(v)
-			if len(gaps) == 0 {
-				fmt.Println("No gaps — every shared key is present in every project.")
+			cross := analysis.FindCrossProjectGaps(v)
+			intra := analysis.FindIntraProjectGaps(v)
+			if len(cross) == 0 && len(intra) == 0 {
+				fmt.Println("No gaps — every shared key is present everywhere.")
 				return nil
 			}
-			w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-			fmt.Fprintln(w, "PROJECT\tMISSING KEY\tDEFINED IN")
-			for _, g := range gaps {
-				fmt.Fprintf(w, "%s\t%s\t%v\n", g.Project, g.Key, g.DefinedIn)
+			if len(cross) > 0 {
+				fmt.Println("Cross-project gaps (same env name across projects):")
+				w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+				fmt.Fprintln(w, "MISSING IN\tKEY\tDEFINED IN")
+				for _, g := range cross {
+					fmt.Fprintf(w, "%s\t%s\t%s\n", g.Ref, g.Key, joinRefs(g.DefinedIn))
+				}
+				w.Flush()
+				fmt.Println()
 			}
-			return w.Flush()
+			if len(intra) > 0 {
+				fmt.Println("Intra-project gaps (across envs of the same project):")
+				w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+				fmt.Fprintln(w, "MISSING IN\tKEY\tDEFINED IN")
+				for _, g := range intra {
+					fmt.Fprintf(w, "%s\t%s\t%s\n", g.Ref, g.Key, joinRefs(g.DefinedIn))
+				}
+				w.Flush()
+			}
+			return nil
 		},
 	}
+}
+
+func joinRefs(refs []analysis.EnvRef) string {
+	out := ""
+	for i, r := range refs {
+		if i > 0 {
+			out += ", "
+		}
+		out += r.String()
+	}
+	return out
 }
 
 func dashboardCmd() *cobra.Command {

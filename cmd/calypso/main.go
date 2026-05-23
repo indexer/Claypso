@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"time"
 	"github.com/spf13/cobra"
 	"github.com/yemon/calypso/internal/crypto"
 	"github.com/yemon/calypso/internal/keychain"
 	"github.com/yemon/calypso/internal/vault"
+	"os"
+	"time"
 )
 
 const maxRetries = 3
@@ -41,6 +41,7 @@ your machine.`,
 		listCmd(), pullCmd(), pushCmd(), diffCmd(), gapsCmd(),
 		removeCmd(), dashboardCmd(), completionCmd(),
 		exportCmd(), importCmd(), keychainCmd(), versionCmd(),
+		envCmd(), vaultCmd(),
 	)
 	root.Version = version
 	return root

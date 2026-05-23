@@ -1,4 +1,5 @@
-// Package project models a registered project and its .env variables.
+// Package project models a registered project and its .env variables across
+// one or more environments (dev, staging, production, etc.).
 package project
 
 import (
@@ -11,14 +12,20 @@ import (
 
 const SafePlaceholder = "****"
 
+// DefaultEnvName is the env created when a project is added without an
+// explicit env name. Loading a v1 vault also migrates each project's flat
+// vars into an Environment under this name.
+const DefaultEnvName = "default"
+
 // Var is a single environment variable.
 type Var struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
 }
 
-// Project is a registered project with its .env path and variables.
-type Project struct {
+// Environment is one named variant of a project (dev / staging / prod /
+// default). It holds the .env path for that variant and its variables.
+type Environment struct {
 	Name      string `json:"name"`
 	Path      string `json:"path"` // absolute
 	Vars      []Var  `json:"vars"`
@@ -27,62 +34,133 @@ type Project struct {
 	keyIndex map[string]int `json:"-"` // lazy, key → index in Vars
 }
 
-func (p *Project) buildIndex() {
-	if p.keyIndex != nil {
+// InvalidateIndex must be called by any caller that replaces or reorders
+// e.Vars directly (e.g. push imports). Set/Unset keep the index in sync
+// automatically.
+func (e *Environment) InvalidateIndex() {
+	e.keyIndex = nil
+}
+
+func (e *Environment) buildIndex() {
+	if e.keyIndex != nil {
 		return
 	}
-	p.keyIndex = make(map[string]int, len(p.Vars))
-	for i, v := range p.Vars {
-		p.keyIndex[v.Key] = i
+	e.keyIndex = make(map[string]int, len(e.Vars))
+	for i, v := range e.Vars {
+		e.keyIndex[v.Key] = i
 	}
 }
 
 // Get returns the value for a key and whether it exists.
-func (p *Project) Get(key string) (string, bool) {
-	p.buildIndex()
-	if i, ok := p.keyIndex[key]; ok {
-		return p.Vars[i].Value, true
+func (e *Environment) Get(key string) (string, bool) {
+	e.buildIndex()
+	if i, ok := e.keyIndex[key]; ok {
+		return e.Vars[i].Value, true
 	}
 	return "", false
 }
 
 // Set inserts or updates a key, preserving insertion order for existing keys.
-func (p *Project) Set(key, value string) {
-	p.buildIndex()
-	if i, ok := p.keyIndex[key]; ok {
-		p.Vars[i].Value = value
+func (e *Environment) Set(key, value string) {
+	e.buildIndex()
+	if i, ok := e.keyIndex[key]; ok {
+		e.Vars[i].Value = value
 		return
 	}
-	p.keyIndex[key] = len(p.Vars)
-	p.Vars = append(p.Vars, Var{Key: key, Value: value})
+	e.keyIndex[key] = len(e.Vars)
+	e.Vars = append(e.Vars, Var{Key: key, Value: value})
 }
 
 // Unset removes a key. Returns true if it existed.
-func (p *Project) Unset(key string) bool {
-	p.buildIndex()
-	i, ok := p.keyIndex[key]
+func (e *Environment) Unset(key string) bool {
+	e.buildIndex()
+	i, ok := e.keyIndex[key]
 	if !ok {
 		return false
 	}
-	n := len(p.Vars) - 1
-	delete(p.keyIndex, key)
+	n := len(e.Vars) - 1
+	delete(e.keyIndex, key)
 	if i < n {
-		// Swap with last to avoid O(n) compaction; update the swapped element's index.
-		p.Vars[i] = p.Vars[n]
-		p.keyIndex[p.Vars[i].Key] = i
+		e.Vars[i] = e.Vars[n]
+		e.keyIndex[e.Vars[i].Key] = i
 	}
-	p.Vars = p.Vars[:n]
+	e.Vars = e.Vars[:n]
 	return true
 }
 
-// Keys returns a sorted slice of the project's keys (for stable display).
-func (p *Project) Keys() []string {
-	keys := make([]string, len(p.Vars))
-	for i, v := range p.Vars {
+// Keys returns a sorted slice of the env's keys (for stable display).
+func (e *Environment) Keys() []string {
+	keys := make([]string, len(e.Vars))
+	for i, v := range e.Vars {
 		keys[i] = v.Key
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// Project is a registered project with one or more named environments.
+type Project struct {
+	Name      string                  `json:"name"`
+	Envs      map[string]*Environment `json:"envs"`
+	UpdatedAt string                  `json:"updated_at"`
+}
+
+// Env fetches an environment by name.
+func (p *Project) Env(name string) (*Environment, bool) {
+	e, ok := p.Envs[name]
+	return e, ok
+}
+
+// EnvNames returns environment names sorted alphabetically.
+func (p *Project) EnvNames() []string {
+	names := make([]string, 0, len(p.Envs))
+	for n := range p.Envs {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// SoleEnv returns the project's only environment if it has exactly one.
+// Used to resolve bare `myapp` references when no @env was supplied.
+func (p *Project) SoleEnv() (*Environment, bool) {
+	if len(p.Envs) != 1 {
+		return nil, false
+	}
+	for _, e := range p.Envs {
+		return e, true
+	}
+	return nil, false
+}
+
+// AddEnv attaches a new environment. Errors if one with that name already exists.
+func (p *Project) AddEnv(name, absPath, stamp string) (*Environment, error) {
+	if p.Envs == nil {
+		p.Envs = make(map[string]*Environment)
+	}
+	if _, exists := p.Envs[name]; exists {
+		return nil, fmt.Errorf("environment %q already exists for project %q", name, p.Name)
+	}
+	e := &Environment{
+		Name:      name,
+		Path:      absPath,
+		UpdatedAt: stamp,
+	}
+	p.Envs[name] = e
+	return e, nil
+}
+
+// RemoveEnv detaches an environment. Errors if it's the project's last env;
+// callers should use Vault.RemoveProject in that case.
+func (p *Project) RemoveEnv(name string) error {
+	if _, ok := p.Envs[name]; !ok {
+		return fmt.Errorf("environment %q not found in project %q", name, p.Name)
+	}
+	if len(p.Envs) == 1 {
+		return fmt.Errorf("cannot remove last environment of project %q; remove the project instead", p.Name)
+	}
+	delete(p.Envs, name)
+	return nil
 }
 
 // ParseEnv reads KEY=value lines from .env content. It tolerates:

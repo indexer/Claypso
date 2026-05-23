@@ -14,39 +14,58 @@
   .pill { display:inline-block; background:#1f6feb22; color:#58a6ff;
           border:1px solid #1f6feb55; border-radius:10px; padding:1px 8px;
           margin:1px; font-size:12px; }
+  .env { display:inline-block; background:#3fb95022; color:#3fb950;
+         border:1px solid #3fb95055; border-radius:10px; padding:1px 8px;
+         margin:1px; font-size:12px; }
   .gap { color:#f0883e; }
   .ok  { color:#3fb950; }
   .path { color:#8b949e; font-size:12px; }
+  .indent { padding-left:24px; }
 </style></head><body>
   <h1>calypso</h1>
   <p class="sub">Local encrypted env manager · read-only view · values are never shown here</p>
 
   <h2>Projects ({{len .Projects}})</h2>
   <table>
-    <tr><th>Project</th><th>Vars</th><th>Updated</th><th>.env path</th></tr>
+    <tr><th>Project / Env</th><th>Vars</th><th>Updated</th><th>.env path</th></tr>
     {{range .Projects}}
-    <tr><td>{{.Name}}</td><td>{{.VarCount}}</td><td>{{.UpdatedAt}}</td>
+    <tr><td><strong>{{.Name}}</strong></td><td></td><td>{{.UpdatedAt}}</td><td></td></tr>
+    {{range .Envs}}
+    <tr><td class="indent"><span class="env">{{.Name}}</span></td>
+        <td>{{.VarCount}}</td><td>{{.UpdatedAt}}</td>
         <td class="path">{{.Path}}</td></tr>
+    {{end}}
     {{end}}
   </table>
 
-  <h2>Missing-value gaps ({{len .Gaps}})</h2>
-  {{if .Gaps}}
+  <h2>Cross-project gaps ({{len .CrossProjectGaps}})</h2>
+  {{if .CrossProjectGaps}}
   <table>
-    <tr><th>Project</th><th class="gap">Missing key</th><th>Defined in</th></tr>
-    {{range .Gaps}}
-    <tr><td>{{.Project}}</td><td class="gap">{{.Key}}</td>
+    <tr><th>Missing in</th><th class="gap">Key</th><th>Defined in</th></tr>
+    {{range .CrossProjectGaps}}
+    <tr><td>{{.Ref}}</td><td class="gap">{{.Key}}</td>
         <td>{{range .DefinedIn}}<span class="pill">{{.}}</span>{{end}}</td></tr>
     {{end}}
   </table>
-  {{else}}<p class="ok">No gaps — every shared key is present everywhere.</p>{{end}}
+  {{else}}<p class="ok">No cross-project gaps — every shared key is present in every project's matching env.</p>{{end}}
+
+  <h2>Intra-project gaps ({{len .IntraProjectGaps}})</h2>
+  {{if .IntraProjectGaps}}
+  <table>
+    <tr><th>Missing in</th><th class="gap">Key</th><th>Defined in</th></tr>
+    {{range .IntraProjectGaps}}
+    <tr><td>{{.Ref}}</td><td class="gap">{{.Key}}</td>
+        <td>{{range .DefinedIn}}<span class="pill">{{.}}</span>{{end}}</td></tr>
+    {{end}}
+  </table>
+  {{else}}<p class="ok">No intra-project gaps — every env of every project has the same keys as its siblings.</p>{{end}}
 
   <h2>Key matrix ({{len .Matrix}} unique keys)</h2>
   <table>
     <tr><th>Key</th><th>Used in</th></tr>
     {{range .Matrix}}
     <tr><td>{{.Key}}</td>
-        <td>{{range .Projects}}<span class="pill">{{.}}</span>{{end}}</td></tr>
+        <td>{{range .Refs}}<span class="pill">{{.}}</span>{{end}}</td></tr>
     {{end}}
   </table>
 </body></html>

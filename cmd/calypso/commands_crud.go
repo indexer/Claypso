@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
 	"github.com/spf13/cobra"
 	"github.com/yemon/calypso/internal/vault"
 )
@@ -28,14 +29,22 @@ func initCmd() *cobra.Command {
 	}
 }
 
+// addCmd handles two shapes:
+//   - `add myapp --path ...`                    → creates project + initial env
+//   - `add myapp@prod --path ...`               → adds env `prod` to an existing project
+//
+// With the bare form, --env names the initial env (default: "default").
 func addCmd() *cobra.Command {
-	var path string
+	var path, envFlag string
 	cmd := &cobra.Command{
-		Use:   "add <project>",
-		Short: "Register a project and the location of its .env file",
+		Use:   "add <project[@env]>",
+		Short: "Register a project, or add a new environment to one",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
+			spec, err := vault.ParseSpec(args[0])
+			if err != nil {
+				return err
+			}
 			if path == "" {
 				path = ".env"
 			}
@@ -45,35 +54,60 @@ func addCmd() *cobra.Command {
 				return err
 			}
 			defer clearBytes(pw)
-			if _, err := v.AddProject(name, path); err != nil {
+
+			// Existing project + @env → attach a new env.
+			if _, exists := v.Projects[spec.Project]; exists {
+				if spec.Env == "" {
+					return fmt.Errorf("project %q already registered; to add an env use `add %s@<env> --path ...`",
+						spec.Project, spec.Project)
+				}
+				e, err := v.AddEnvToProject(spec.Project, spec.Env, path)
+				if err != nil {
+					return err
+				}
+				if err := v.Save(ctx, vaultPath, pw); err != nil {
+					return err
+				}
+				fmt.Printf("Added env %q to %q → %s\n", e.Name, spec.Project, e.Path)
+				return nil
+			}
+
+			// New project.
+			envName := spec.Env
+			if envName == "" {
+				envName = envFlag // may be "" → AddProject defaults to project.DefaultEnvName
+			}
+			_, e, err := v.AddProject(spec.Project, envName, path)
+			if err != nil {
 				return err
 			}
 			if err := v.Save(ctx, vaultPath, pw); err != nil {
 				return err
 			}
-			fmt.Printf("Registered %q → %s\n", name, path)
-			fmt.Printf("Tip: `calypso push %s` to import an existing .env, or `calypso set %s KEY=value`.\n", name, name)
+			fmt.Printf("Registered %q (env %q) → %s\n", spec.Project, e.Name, e.Path)
+			fmt.Printf("Tip: `calypso push %s` to import an existing .env, or `calypso set %s KEY=value`.\n",
+				spec.Project, spec.Project)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&path, "path", "", "path to the project's .env file (default ./.env)")
+	cmd.Flags().StringVar(&envFlag, "env", "", "name of the initial env (default: \"default\")")
 	return cmd
 }
 
 func setCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "set <project> KEY=value [KEY=value ...]",
+		Use:   "set <project[@env]> KEY=value [KEY=value ...]",
 		Short: "Set one or more variables in the vault",
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
 			ctx := cmd.Context()
 			v, pw, err := openVault(ctx)
 			if err != nil {
 				return err
 			}
 			defer clearBytes(pw)
-			p, err := v.Project(name)
+			p, e, err := v.ResolveEnv(args[0])
 			if err != nil {
 				return err
 			}
@@ -82,13 +116,13 @@ func setCmd() *cobra.Command {
 				if eq < 0 {
 					return fmt.Errorf("invalid pair %q, expected KEY=value", kv)
 				}
-				p.Set(strings.TrimSpace(kv[:eq]), kv[eq+1:])
+				e.Set(strings.TrimSpace(kv[:eq]), kv[eq+1:])
 			}
-			v.Touch(name)
+			v.Touch(p.Name, e.Name)
 			if err := v.Save(ctx, vaultPath, pw); err != nil {
 				return err
 			}
-			fmt.Printf("Updated %d variable(s) in %q.\n", len(args)-1, name)
+			fmt.Printf("Updated %d variable(s) in %s@%s.\n", len(args)-1, p.Name, e.Name)
 			return nil
 		},
 	}
@@ -97,7 +131,7 @@ func setCmd() *cobra.Command {
 func getCmd() *cobra.Command {
 	var reveal bool
 	cmd := &cobra.Command{
-		Use:   "get <project> [KEY]",
+		Use:   "get <project[@env]> [KEY]",
 		Short: "Show variables (masked unless --reveal)",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -106,19 +140,19 @@ func getCmd() *cobra.Command {
 				return err
 			}
 			clearBytes(pw)
-			p, err := v.Project(args[0])
+			_, e, err := v.ResolveEnv(args[0])
 			if err != nil {
 				return err
 			}
 			if len(args) == 2 {
-				val, ok := p.Get(args[1])
+				val, ok := e.Get(args[1])
 				if !ok {
 					return fmt.Errorf("key %q not found in %q", args[1], args[0])
 				}
 				fmt.Println(maybeMask(val, reveal))
 				return nil
 			}
-			for _, kv := range p.Vars {
+			for _, kv := range e.Vars {
 				fmt.Printf("%s=%s\n", kv.Key, maybeMask(kv.Value, reveal))
 			}
 			return nil
@@ -130,7 +164,7 @@ func getCmd() *cobra.Command {
 
 func unsetCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "unset <project> KEY [KEY ...]",
+		Use:   "unset <project[@env]> KEY [KEY ...]",
 		Short: "Remove variables from the vault",
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -140,44 +174,56 @@ func unsetCmd() *cobra.Command {
 				return err
 			}
 			defer clearBytes(pw)
-			p, err := v.Project(args[0])
+			p, e, err := v.ResolveEnv(args[0])
 			if err != nil {
 				return err
 			}
 			removed := 0
 			for _, k := range args[1:] {
-				if p.Unset(k) {
+				if e.Unset(k) {
 					removed++
 				}
 			}
-			v.Touch(args[0])
+			v.Touch(p.Name, e.Name)
 			if err := v.Save(ctx, vaultPath, pw); err != nil {
 				return err
 			}
-			fmt.Printf("Removed %d variable(s) from %q.\n", removed, args[0])
+			fmt.Printf("Removed %d variable(s) from %s@%s.\n", removed, p.Name, e.Name)
 			return nil
 		},
 	}
 }
 
+// removeCmd handles both:
+//   - `remove myapp`        → unregister the whole project (and all envs)
+//   - `remove myapp@prod`   → remove just env `prod` (refuses if it's the last env)
 func removeCmd() *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
-		Use:   "remove <project>",
-		Short: "Unregister a project from the vault (does not delete its .env)",
+		Use:   "remove <project[@env]>",
+		Short: "Unregister a project, or remove one environment from it",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			spec, err := vault.ParseSpec(args[0])
+			if err != nil {
+				return err
+			}
 			ctx := cmd.Context()
 			v, pw, err := openVault(ctx)
 			if err != nil {
 				return err
 			}
 			defer clearBytes(pw)
-			if _, err := v.Project(args[0]); err != nil {
+			if _, err := v.Project(spec.Project); err != nil {
 				return err
 			}
+
+			target := spec.Project
+			if spec.Env != "" {
+				target = spec.Project + "@" + spec.Env
+			}
 			if !force {
-				ok, err := confirmYesNo(os.Stderr, fmt.Sprintf("Remove %q from the vault?", args[0]), false)
+				ok, err := confirmYesNo(os.Stderr, fmt.Sprintf("Remove %q from the vault?", target), false)
 				if err != nil {
 					return err
 				}
@@ -185,13 +231,25 @@ func removeCmd() *cobra.Command {
 					return fmt.Errorf("remove cancelled")
 				}
 			}
-			if err := v.RemoveProject(args[0]); err != nil {
+
+			if spec.Env != "" {
+				if err := v.RemoveEnv(spec.Project, spec.Env); err != nil {
+					return err
+				}
+				if err := v.Save(ctx, vaultPath, pw); err != nil {
+					return err
+				}
+				fmt.Printf("Removed env %q from %q.\n", spec.Env, spec.Project)
+				return nil
+			}
+
+			if err := v.RemoveProject(spec.Project); err != nil {
 				return err
 			}
 			if err := v.Save(ctx, vaultPath, pw); err != nil {
 				return err
 			}
-			fmt.Printf("Removed %q from the vault.\n", args[0])
+			fmt.Printf("Removed %q from the vault.\n", spec.Project)
 			return nil
 		},
 	}

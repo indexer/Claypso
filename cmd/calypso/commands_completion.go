@@ -1,8 +1,8 @@
 package main
 
 import (
-	"os"
 	"github.com/spf13/cobra"
+	"os"
 )
 
 func completionCmd() *cobra.Command {
