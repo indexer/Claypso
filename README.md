@@ -119,6 +119,70 @@ calypso pull myapp -- npm test --verbose
 # 3. Overwrites .env with **** (always, even on failure)
 ```
 
+## Multiple Environments (staging / dev / production)
+
+Each project can have multiple environments, each with its own `.env` file.
+Use `name@env` to target a specific one, or bare `name` when there's only one.
+
+### Setup
+
+```bash
+# Create a project with a dev environment
+calypso add myapp --env dev --path .env.dev
+
+# Add a production environment to the same project
+calypso add myapp@prod --path .env.production
+
+# Add staging by cloning from dev
+calypso env copy myapp@dev staging --path .env.staging
+```
+
+### Day-to-day
+
+```bash
+calypso set myapp@dev API_KEY=sk-test
+calypso set myapp@prod API_KEY=sk-live STRIPE_KEY=sk_live_abc
+calypso push myapp@staging --force
+
+# Pull per environment
+calypso pull myapp@dev --safe       # mask before LLM sessions
+calypso pull myapp@staging          # write real values
+```
+
+### View environments
+
+```bash
+calypso env list myapp
+```
+
+```
+ENV      VARS  UPDATED               PATH
+dev      3     2026-05-23T10:00:00Z  .env.dev
+prod     5     2026-05-23T10:01:00Z  .env.production
+staging  3     2026-05-23T10:02:00Z  .env.staging
+```
+
+### Compare environments of the same project
+
+```bash
+calypso diff myapp@dev myapp@prod --reveal
+```
+
+```
+KEY        myapp@dev    myapp@prod    STATUS
+API_KEY    sk-test      sk-live       differs
+STRIPE_KEY —            sk_live_abc   only in myapp@prod
+```
+
+### How it works
+
+- Without `@env`, a project has one environment named `"default"` (invisible).
+- Adding a second env enables the `name@env` syntax — bare `name` then returns
+  a clear error listing available envs.
+- `env copy` deep-copies all variables from one env to another.
+- Every command that takes a project name supports `name@env`: `set`, `get`,
+  `unset`, `push`, `pull`, `diff`, `remove`.
+
 ## Keychain (no more typing passphrases)
 
 Store the master passphrase in your OS keychain:
@@ -234,38 +298,47 @@ Values are **never shown**.
 ### Project management
 
 ```bash
-calypso add <name> --path <path>     # register a project
-calypso remove <name>                # unregister (does not delete .env)
-calypso list                         # table of all projects
+calypso add <name> --path <path>           # register a project
+calypso add <name> --env <env> --path <p>  # register with named env
+calypso add <name@env> --path <p>          # add an env to existing project
+calypso remove <name[@env]>                # remove project or single env
+calypso list                               # table of all projects + envs
+```
+
+### Environment management
+
+```bash
+calypso env list <project>                 # list environments in a project
+calypso env copy <src@env> <dst> --path <p> # clone an env's vars into a new one
 ```
 
 ### Variables
 
 ```bash
-calypso set <name> KEY=value...      # add or update
-calypso get <name> [KEY]             # view (masked by default)
-calypso get <name> --reveal          # view real values
-calypso unset <name> KEY...          # remove variables
+calypso set <name[@env]> KEY=value...      # add or update
+calypso get <name[@env]> [KEY]             # view (masked by default)
+calypso get <name[@env]> --reveal          # view real values
+calypso unset <name[@env]> KEY...          # remove variables
 ```
 
 ### Sync
 
 ```bash
-calypso push <name>                  # import .env → vault (confirms changes)
-calypso push <name> --force          # skip confirmation
-calypso pull <name>                  # export vault → .env (real values)
-calypso pull <name> --safe           # masked values (****) for LLM safety
-calypso pull <name> --example        # empty values for .env.example
-calypso pull <name> -- command...    # --wipe: write, run command, shred
+calypso push <name[@env]>                  # import .env → vault (confirms changes)
+calypso push <name[@env]> --force          # skip confirmation
+calypso pull <name[@env]>                  # export vault → .env (real values)
+calypso pull <name[@env]> --safe           # masked values (****) for LLM safety
+calypso pull <name[@env]> --example        # empty values for .env.example
+calypso pull <name[@env]> -- command...    # --wipe: write, run command, shred
 ```
 
 ### Analysis
 
 ```bash
-calypso diff <A> <B>                 # compare two projects
-calypso diff <A> <B> --reveal        # with real values
-calypso gaps                         # find missing keys across projects
-calypso dashboard --port <N>         # web overview
+calypso diff <A[@env]> <B[@env]>           # compare two projects or envs
+calypso diff <A[@env]> <B[@env]> --reveal   # with real values
+calypso gaps                               # find missing keys across all
+calypso dashboard --port <N>               # web overview
 ```
 
 ### Vault management
@@ -329,15 +402,15 @@ calypso version                      # print version info
 ## Architecture
 
 ```
-cmd/calypso/         CLI (Cobra), 17 commands
+cmd/calypso/           CLI (Cobra), 20+ commands
 internal/
-  crypto/            Argon2id + NaCl secretbox
-  vault/             Encrypted vault CRUD + file locking
-  project/           .env parse (multiline), serialize, I/O
-  analysis/          Diff, gaps, key matrix
-  dashboard/         Web UI (go:embed template)
-  lockfile/          Advisory flock(2) locking
-  keychain/          macOS Keychain / Linux libsecret
+  crypto/              Argon2id + NaCl secretbox
+  vault/               Encrypted vault + envs + file locking
+  project/             .env parse (multiline), types, serialize
+  analysis/            Diff, gaps, key matrix
+  dashboard/           Web UI (go:embed template)
+  lockfile/            Advisory flock(2) locking
+  keychain/            macOS Keychain / Linux libsecret
 ```
 
 ## Development
