@@ -2,7 +2,6 @@ package analysis
 
 import (
 	"testing"
-
 	"github.com/yemon/calypso/internal/project"
 	"github.com/yemon/calypso/internal/vault"
 )

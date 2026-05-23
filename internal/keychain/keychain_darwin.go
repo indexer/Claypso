@@ -4,7 +4,6 @@ package keychain
 
 import (
 	"os/exec"
-	"strings"
 )
 
 func store(passphrase []byte) error {

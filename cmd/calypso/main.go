@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"time"
-
 	"github.com/spf13/cobra"
 	"github.com/yemon/calypso/internal/crypto"
 	"github.com/yemon/calypso/internal/keychain"

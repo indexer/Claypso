@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
 	"github.com/yemon/calypso/internal/project"
 )
 

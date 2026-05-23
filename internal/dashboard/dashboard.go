@@ -13,7 +13,6 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-
 	"github.com/yemon/calypso/internal/analysis"
 	"github.com/yemon/calypso/internal/project"
 )

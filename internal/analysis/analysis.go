@@ -4,7 +4,6 @@ package analysis
 
 import (
 	"sort"
-
 	"github.com/yemon/calypso/internal/project"
 )
 

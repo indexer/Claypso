@@ -4,9 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"syscall"
 	"text/tabwriter"
-
 	"github.com/spf13/cobra"
 	"github.com/yemon/calypso/internal/analysis"
 	"github.com/yemon/calypso/internal/dashboard"
@@ -113,7 +111,6 @@ func wipeAndRun(envPath string, vars []project.Var, command []string) error {
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 	c.Env = os.Environ()
-	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	runErr := c.Run()
 

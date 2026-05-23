@@ -1,3 +1,5 @@
+//go:build !windows
+
 // Package lockfile provides advisory file locking via flock(2).
 package lockfile
 
@@ -7,8 +9,6 @@ import (
 	"syscall"
 )
 
-// Lock acquires an exclusive flock on the file at path (non-blocking).
-// Returns the locked file handle; caller must Unlock.
 func Lock(path string) (*os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
@@ -24,7 +24,6 @@ func Lock(path string) (*os.File, error) {
 	return f, nil
 }
 
-// Unlock releases the lock and closes the file.
 func Unlock(f *os.File) error {
 	unlockErr := syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 	closeErr := f.Close()

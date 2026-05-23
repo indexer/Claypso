@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/nacl/secretbox"
 )

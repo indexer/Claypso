@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
-
 	"github.com/yemon/calypso/internal/crypto"
 	"github.com/yemon/calypso/internal/lockfile"
 	"github.com/yemon/calypso/internal/project"
