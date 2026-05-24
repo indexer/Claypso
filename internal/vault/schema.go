@@ -71,6 +71,16 @@ func (v *Vault) writeUnlocked(ctx context.Context, path string, passphrase []byt
 		return err
 	}
 	v.loadedVersion = target
+
+	// Auto-backup is best-effort: failure here doesn't undo the save (the
+	// primary vault file is intact). We surface the error so the CLI can
+	// warn, but writeUnlocked's contract is "vault saved successfully".
+	if err := autoBackup(path, blob, RetentionFromEnv()); err != nil {
+		// Stash on the vault so callers can surface it; otherwise silent.
+		v.lastBackupErr = err
+	} else {
+		v.lastBackupErr = nil
+	}
 	return nil
 }
 

@@ -17,7 +17,7 @@ func vaultCmd() *cobra.Command {
 		Use:   "vault",
 		Short: "Maintenance commands for the vault file itself",
 	}
-	cmd.AddCommand(vaultDowngradeCmd())
+	cmd.AddCommand(vaultDowngradeCmd(), vaultBackupsCmd(), vaultVerifyCmd(), vaultExportProjectCmd())
 	return cmd
 }
 

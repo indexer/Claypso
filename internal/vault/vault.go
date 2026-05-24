@@ -28,8 +28,14 @@ type Vault struct {
 	Projects  map[string]*project.Project `json:"projects"`
 	CreatedAt string                      `json:"created_at"`
 
-	loadedVersion int `json:"-"` // 0 for brand-new vaults; otherwise the version read from disk
+	loadedVersion int   `json:"-"` // 0 for brand-new vaults; otherwise the version read from disk
+	lastBackupErr error `json:"-"` // set by writeUnlocked when auto-backup fails (non-fatal)
 }
+
+// LastBackupErr returns the most recent auto-backup error, or nil. The save
+// itself succeeded; this surfaces backup problems (disk full, perms) so the
+// CLI can warn without failing the user's primary command.
+func (v *Vault) LastBackupErr() error { return v.lastBackupErr }
 
 var (
 	ErrExists      = errors.New("vault already exists")

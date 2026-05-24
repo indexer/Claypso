@@ -96,7 +96,7 @@ func envCopyCmd() *cobra.Command {
 			dst.InvalidateIndex()
 			v.Touch(p.Name, dst.Name)
 
-			if err := v.Save(ctx, vaultPath, pw); err != nil {
+			if err := saveAndWarn(ctx, v, pw); err != nil {
 				return err
 			}
 			fmt.Printf("Copied %d variable(s) from %s@%s into %s@%s → %s\n",

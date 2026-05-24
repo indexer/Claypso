@@ -64,7 +64,7 @@ func addCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := v.Save(ctx, vaultPath, pw); err != nil {
+				if err := saveAndWarn(ctx, v, pw); err != nil {
 					return err
 				}
 				fmt.Printf("Added env %q to %q → %s\n", e.Name, spec.Project, e.Path)
@@ -80,7 +80,7 @@ func addCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := v.Save(ctx, vaultPath, pw); err != nil {
+			if err := saveAndWarn(ctx, v, pw); err != nil {
 				return err
 			}
 			fmt.Printf("Registered %q (env %q) → %s\n", spec.Project, e.Name, e.Path)
@@ -136,7 +136,7 @@ func removeCmd() *cobra.Command {
 				if err := v.RemoveEnv(spec.Project, spec.Env); err != nil {
 					return err
 				}
-				if err := v.Save(ctx, vaultPath, pw); err != nil {
+				if err := saveAndWarn(ctx, v, pw); err != nil {
 					return err
 				}
 				fmt.Printf("Removed env %q from %q.\n", spec.Env, spec.Project)
@@ -146,7 +146,7 @@ func removeCmd() *cobra.Command {
 			if err := v.RemoveProject(spec.Project); err != nil {
 				return err
 			}
-			if err := v.Save(ctx, vaultPath, pw); err != nil {
+			if err := saveAndWarn(ctx, v, pw); err != nil {
 				return err
 			}
 			fmt.Printf("Removed %q from the vault.\n", spec.Project)

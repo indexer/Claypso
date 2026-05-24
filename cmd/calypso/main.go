@@ -41,7 +41,7 @@ your machine.`,
 		listCmd(), pullCmd(), pushCmd(), diffCmd(), gapsCmd(),
 		removeCmd(), dashboardCmd(), completionCmd(),
 		exportCmd(), importCmd(), keychainCmd(), versionCmd(),
-		envCmd(), vaultCmd(),
+		envCmd(), vaultCmd(), driftCmd(),
 	)
 	root.Version = version
 	return root

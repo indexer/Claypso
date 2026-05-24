@@ -167,7 +167,7 @@ func pushCmd() *cobra.Command {
 			e.Vars = vars
 			e.InvalidateIndex()
 			v.Touch(p.Name, e.Name)
-			if err := v.Save(ctx, vaultPath, pw); err != nil {
+			if err := saveAndWarn(ctx, v, pw); err != nil {
 				return err
 			}
 			fmt.Printf("Imported %d variable(s) from %s into %s@%s.\n", len(vars), e.Path, p.Name, e.Name)

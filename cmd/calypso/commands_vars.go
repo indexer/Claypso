@@ -31,7 +31,7 @@ func setCmd() *cobra.Command {
 				e.Set(strings.TrimSpace(kv[:eq]), kv[eq+1:])
 			}
 			v.Touch(p.Name, e.Name)
-			if err := v.Save(ctx, vaultPath, pw); err != nil {
+			if err := saveAndWarn(ctx, v, pw); err != nil {
 				return err
 			}
 			fmt.Printf("Updated %d variable(s) in %s@%s.\n", len(args)-1, p.Name, e.Name)
@@ -97,7 +97,7 @@ func unsetCmd() *cobra.Command {
 				}
 			}
 			v.Touch(p.Name, e.Name)
-			if err := v.Save(ctx, vaultPath, pw); err != nil {
+			if err := saveAndWarn(ctx, v, pw); err != nil {
 				return err
 			}
 			fmt.Printf("Removed %d variable(s) from %s@%s.\n", removed, p.Name, e.Name)

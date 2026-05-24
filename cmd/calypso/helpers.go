@@ -3,13 +3,15 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
-	"golang.org/x/term"
 	"io"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+
+	"golang.org/x/term"
 )
 
 // clearBytes securely zeroes a byte slice in memory.
@@ -102,6 +104,32 @@ func confirmYesNo(out io.Writer, prompt string, defaultYes bool) (bool, error) {
 		return defaultYes, nil
 	}
 	return answer == "y" || answer == "yes", nil
+}
+
+// warnBackupErr emits a stderr warning if the most recent Save's auto-backup
+// failed. The Save itself succeeded — this just lets the user know the new
+// backup wasn't written (disk full, perms, etc.).
+func warnBackupErr(v interface{ LastBackupErr() error }) {
+	if err := v.LastBackupErr(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: auto-backup failed: %v\n", err)
+	}
+}
+
+// vaultSaver is the narrow interface saveAndWarn needs. *vault.Vault satisfies it.
+type vaultSaver interface {
+	Save(ctx context.Context, path string, passphrase []byte) error
+	LastBackupErr() error
+}
+
+// saveAndWarn writes the vault and, if Save succeeded, surfaces any
+// auto-backup warning to stderr. Use this in CLI commands instead of
+// calling v.Save directly so backup problems aren't silent.
+func saveAndWarn(ctx context.Context, v vaultSaver, pw []byte) error {
+	if err := v.Save(ctx, vaultPath, pw); err != nil {
+		return err
+	}
+	warnBackupErr(v)
+	return nil
 }
 
 // maybeMask shows first 2 + last 2 chars unless reveal is true.
