@@ -185,21 +185,210 @@ STRIPE_KEY —            sk_live_abc   only in myapp@prod
 
 ## Keychain (no more typing passphrases)
 
-Store the master passphrase in your OS keychain:
+The OS keychain stores **the master passphrase** (not the env values)
+so calypso can unlock the vault transparently on every command. After a
+one-time setup, you stop typing the passphrase entirely.
+
+### One-time setup
 
 ```bash
-calypso keychain save     # prompt once, store in keychain
-calypso keychain status   # check if stored
-calypso keychain forget   # remove from keychain
+calypso keychain save
+# Master passphrase: ************
+# Passphrase stored in keychain.
 ```
 
-After `keychain save`, every `calypso` command retrieves the passphrase
-automatically — no more typing.
+That's it. From then on:
 
-| Platform | Backend | Install |
-|----------|---------|---------|
-| macOS | Keychain | Built-in |
-| Linux | libsecret | `apt install libsecret-tools` |
+```bash
+calypso get myapp@dev API_KEY     # no prompt
+calypso pull myapp@prod            # no prompt
+calypso set myapp@dev FOO=bar      # no prompt
+```
+
+Under the hood, every command's `openVault` tries the keychain first.
+If it returns a working passphrase, the vault opens silently. If the
+stored passphrase is wrong (you rotated it manually), calypso forgets
+the keychain entry automatically and falls back to prompting.
+
+### What's stored where
+
+| Thing                  | Where                           | Protected by                 |
+|------------------------|---------------------------------|------------------------------|
+| Master passphrase      | OS keychain                     | OS-level user authentication |
+| Env values             | `~/.calypso/vault.enc`          | Argon2id + NaCl secretbox    |
+| Auto-backups           | `~/.calypso/vault.enc.backups/` | Same crypto as the vault     |
+
+The vault file itself is **always** encrypted on disk. The keychain
+just removes the typing step at unlock time — it does not lower the
+encryption strength of your data at rest.
+
+### Platform backends
+
+| Platform | Backend                  | Install                                          |
+|----------|--------------------------|--------------------------------------------------|
+| macOS    | Keychain (`security`)    | Built-in                                         |
+| Linux    | libsecret (`secret-tool`)| `apt install libsecret-tools` (or distro equiv.) |
+| Windows  | not yet supported        | use `ENVHUB_PASSPHRASE` env var instead          |
+
+Check what calypso sees:
+
+```bash
+calypso keychain status
+# Keychain backend: available, passphrase is stored
+```
+
+If you see "not available" on Linux, install `libsecret-tools`.
+
+### Removing it
+
+```bash
+calypso keychain forget
+# Passphrase removed from keychain.
+```
+
+Calypso goes back to prompting on every command. Use this before
+walking away from a shared machine, or before handing off ownership of
+your workstation.
+
+### Rotating the passphrase
+
+Calypso doesn't yet ship a built-in re-key command. The manual flow:
+
+```bash
+calypso export ~/old.enc                  # backup current vault
+calypso keychain forget                   # drop the cached passphrase
+# move ~/.calypso/vault.enc aside, then `calypso init` with the new passphrase
+# import projects from your backup with `calypso import --merge` if needed
+calypso keychain save                     # cache the new passphrase
+```
+
+A first-class `calypso vault rekey` is on the roadmap.
+
+### For AI coding agents (Cursor, Claude Code, Codex, Cline, …)
+
+If you have an AI agent driving a terminal — Cursor's terminal, Claude
+Code, Codex CLI, Cline, Aider, or anything else that shells out — a
+passphrase prompt **will block the agent**. The agent can't see the
+hidden password field, can't type into it, and the command hangs
+forever (or fails immediately with `inappropriate ioctl for device`
+when there's no TTY). The agent is then stuck and your turn dies.
+
+The keychain fixes this. Do this *once* in your own terminal (not in
+the agent's):
+
+```bash
+calypso keychain save
+# Master passphrase: ************
+# Passphrase stored in keychain.
+```
+
+From then on, the agent can run calypso freely:
+
+```bash
+# Agent terminal — these all succeed without any prompt
+calypso list
+calypso get myapp@dev DB_HOST              # masked: lo***st
+calypso pull myapp@dev                     # writes real values to .env
+calypso pull myapp@dev -- npm test         # runs your tests with real values
+calypso drift myapp@dev                    # alerts if .env was hand-edited
+```
+
+#### Remote/cloud dev environments
+
+If the agent is running in a place where the OS keychain isn't
+available — Codespaces, Gitpod, Coder, a remote ssh box, a cloud agent
+that spins up containers — `keychain save` will fail or be useless.
+Use `ENVHUB_PASSPHRASE` instead. Set it as a workspace secret (NOT in
+a tracked file):
+
+```bash
+# Set ONCE in your workspace's env-config UI:
+export ENVHUB_PASSPHRASE="your-master-passphrase"
+
+# Then the agent runs the same commands as above, prompt-free:
+calypso pull myapp@dev -- npm test
+```
+
+GitHub Codespaces: add it under *Settings → Codespaces → Secrets*.
+Gitpod: under *Variables*. Most cloud agents have an equivalent
+"environment" or "secrets" panel — they get injected into every shell
+the agent opens, so no prompt is ever needed.
+
+#### What can the agent see after this setup?
+
+Once the agent can unlock the vault (via keychain or
+`ENVHUB_PASSPHRASE`), it has **the same access you have**:
+
+| Command                          | What the agent sees                                |
+|----------------------------------|----------------------------------------------------|
+| `calypso get myapp KEY`          | Masked value (`sk***23`)                           |
+| `calypso get myapp KEY --reveal` | **Real value** (`sk-test-abc123`)                  |
+| `calypso pull myapp`             | Writes **real values** to `.env` on disk           |
+| `calypso pull myapp --safe`      | Writes `****` placeholders                         |
+| `calypso pull myapp -- cmd…`     | Real values during `cmd`, wiped to `****` after    |
+
+If you're happy with the agent seeing real values (it needs them to
+run your code anyway), this is fine. If you'd rather it didn't print
+secrets to chat where you might screenshot or paste them, lock it
+down at the tool layer:
+
+- **Cursor / Claude Code / Cline**: use the permission allowlist.
+  Allow `calypso list`, `calypso get` (without `--reveal`), `calypso
+  pull -- cmd…`, `calypso drift`. Disallow `calypso get --reveal`,
+  `calypso pull` (without a trailing `-- cmd`), `calypso export`.
+- **Prompt convention**: tell the agent "use `calypso pull X --safe`
+  whenever you need to show me .env structure" and "use `calypso pull
+  X -- cmd…` to run code that needs real values — never plain `pull`".
+- **Inject, don't write**: `calypso pull myapp -- npm test` injects
+  real values into the subprocess, then immediately overwrites the
+  `.env` with `****` placeholders. The agent's next read of `.env`
+  sees masked values, not real ones.
+
+The tool-permission allowlist in your agent is the enforcement point —
+calypso happily prints real values when asked, so the discipline of
+*not* asking has to live in the agent's configuration.
+
+### How it interacts with `ENVHUB_PASSPHRASE`
+
+If `ENVHUB_PASSPHRASE` is set, calypso uses it and **skips the keychain
+entirely** — handy for CI scripts that shouldn't touch the user's
+keychain, and for `keychain save` itself (it stores whatever
+`ENVHUB_PASSPHRASE` provides without re-prompting).
+
+### Security tradeoffs (read before turning it on)
+
+The keychain is convenient because it removes a friction step. It also
+moves the security boundary, so know what you're trading.
+
+**What the keychain gives you**
+- The vault file stays encrypted with the same Argon2id + secretbox
+  scheme. Stealing `vault.enc` alone is still useless without the
+  passphrase.
+- The passphrase lives in a per-user OS-managed credential store, not
+  in a config file, env var, or your shell history.
+- macOS Keychain and libsecret both gate access with the OS user
+  session. A locked screen means a locked passphrase.
+
+**What it gives up**
+- *Any* process running as your user can read the passphrase. On
+  Linux: `secret-tool lookup app calypso`. On macOS:
+  `security find-generic-password -a calypso -w`. That includes
+  shell scripts you ran, malware that compromised your account, and
+  the LLM coding agent in your editor. The passphrase is no longer
+  the security boundary — your user account is.
+- Backups taken with `calypso vault backups` or `calypso export` will
+  decrypt with the keychain-cached passphrase. Anyone with both your
+  user account and your vault file gets your secrets.
+
+**When to use it**
+- ✅ Your personal laptop, where you trust everything running as you.
+- ✅ A workstation where you accept that compromise-of-user equals
+  compromise-of-secrets (which is usually true regardless).
+- ❌ Shared machines (multiple humans logging in as the same user).
+- ❌ CI runners and remote agents — use `ENVHUB_PASSPHRASE` for the
+  duration of the job instead.
+- ❌ Machines where you run untrusted code as your user (e.g. a
+  freshly cloned repo with build scripts you haven't audited).
 
 ## Backup & Transfer
 
