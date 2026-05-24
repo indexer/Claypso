@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"syscall"
 
 	"github.com/spf13/cobra"
 	"github.com/yemon/calypso/internal/analysis"
@@ -114,7 +113,10 @@ func wipeAndRun(envPath string, vars []project.Var, command []string) error {
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 	c.Env = os.Environ()
-	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Put the child in its own process group on Unix so signals (Ctrl+C)
+	// reach it directly rather than us. Windows has no equivalent and the
+	// helper is a no-op there — see wipe_procgroup_*.go.
+	setProcessGroup(c)
 
 	runErr := c.Run()
 
