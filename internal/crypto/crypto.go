@@ -17,8 +17,8 @@ const (
 	nonceLen = 24
 	keyLen   = 32
 
-	argonTime    = 3
-	argonMemory  = 64 * 1024
+	argonTime    = 4
+	argonMemory  = 128 * 1024
 	argonThreads = 4
 )
 

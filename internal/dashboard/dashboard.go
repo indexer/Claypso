@@ -72,9 +72,14 @@ func Serve(v VaultReader, port int) error {
 }
 
 func newHandler(v VaultReader) http.Handler {
+	view := buildView(v)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if err := pageTmpl.Execute(w, buildView(v)); err != nil {
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		if err := pageTmpl.Execute(w, view); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	})

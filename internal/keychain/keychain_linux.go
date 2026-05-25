@@ -3,14 +3,14 @@
 package keychain
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
-	"strings"
 )
 
 func store(passphrase []byte) error {
 	cmd := exec.Command("secret-tool", "store", "--label=calypso vault passphrase", "app", ServiceName)
-	cmd.Stdin = strings.NewReader(string(passphrase))
+	cmd.Stdin = bytes.NewReader(passphrase)
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
@@ -20,7 +20,7 @@ func retrieve() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	return bytes.TrimRight(out, "\n"), nil
 }
 
 func forget() error {

@@ -1,7 +1,6 @@
 package project
 
 import (
-	"fmt"
 	"os"
 	"strings"
 )
@@ -9,9 +8,13 @@ import (
 // serialize writes a header followed by KEY=value lines produced by valueFor.
 func serialize(header string, vars []Var, valueFor func(Var) string) string {
 	var b strings.Builder
+	b.Grow(len(header) + len(vars)*32)
 	b.WriteString(header)
 	for _, v := range vars {
-		fmt.Fprintf(&b, "%s=%s\n", v.Key, valueFor(v))
+		b.WriteString(v.Key)
+		b.WriteByte('=')
+		b.WriteString(valueFor(v))
+		b.WriteByte('\n')
 	}
 	return b.String()
 }

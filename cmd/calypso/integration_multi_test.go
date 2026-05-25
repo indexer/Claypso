@@ -94,7 +94,7 @@ func TestIntegration_WrongPassphrase(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.enc")
 
-	runCalypso(t, bin, "correct", "--vault", vaultPath, "add", "x", "--path", filepath.Join(dir, ".env"))
+	runCalypso(t, bin, "correct!", "--vault", vaultPath, "add", "x", "--path", filepath.Join(dir, ".env"))
 
 	cmd := exec.Command(bin, "--vault", vaultPath, "get", "x")
 	cmd.Env = append(os.Environ(), "ENVHUB_PASSPHRASE=wrong")

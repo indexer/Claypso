@@ -14,6 +14,10 @@ import (
 	"golang.org/x/term"
 )
 
+const (
+	minPassphraseLen = 8
+)
+
 // clearBytes securely zeroes a byte slice in memory.
 func clearBytes(b []byte) {
 	for i := range b {
@@ -64,6 +68,10 @@ func readNewPassphrase() ([]byte, error) {
 		pw, fromEnv, err := promptPassphrase("Choose a master passphrase: ")
 		if err != nil {
 			return nil, err
+		}
+		if len(pw) < minPassphraseLen {
+			clearBytes(pw)
+			return nil, fmt.Errorf("passphrase must be at least %d characters", minPassphraseLen)
 		}
 		confirm, _, err := promptPassphrase("Confirm passphrase: ")
 		if err != nil {
@@ -140,13 +148,25 @@ func maybeMask(val string, reveal bool) string {
 	if len(val) <= 4 {
 		return "****"
 	}
-	var b strings.Builder
-	middle := len(val) - 4
-	b.Grow(len(val))
-	b.WriteString(val[:2])
-	for i := 0; i < middle; i++ {
-		b.WriteByte('*')
+	n := len(val)
+	mid := n - 4
+	b := make([]byte, n)
+	copy(b[:2], val[:2])
+	for i := 2; i < 2+mid; i++ {
+		b[i] = '*'
 	}
-	b.WriteString(val[len(val)-2:])
-	return b.String()
+	copy(b[2+mid:], val[n-2:])
+	return string(b)
+}
+
+// stripSensitiveEnv removes ENVHUB_PASSPHRASE from the environment slice
+// before passing it to child processes.
+func stripSensitiveEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if len(kv) < 18 || kv[:18] != "ENVHUB_PASSPHRASE=" {
+			out = append(out, kv)
+		}
+	}
+	return out
 }

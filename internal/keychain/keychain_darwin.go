@@ -13,6 +13,7 @@ func store(passphrase []byte) error {
 		"-U",
 		"-w", string(passphrase),
 	)
+	cmd.Env = nil
 	return cmd.Run()
 }
 
