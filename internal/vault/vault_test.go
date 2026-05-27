@@ -40,6 +40,55 @@ func TestInitAndLoad(t *testing.T) {
 	}
 }
 
+// TestSaveReusesLoadedSalt verifies the key-caching optimization: after a
+// Load, saving again reuses the on-disk salt (and therefore the already-derived
+// key) instead of generating a new salt and re-running Argon2id. The salt is
+// the first 16 bytes of the encrypted file; it must be stable across saves
+// within the same in-memory vault.
+func TestSaveReusesLoadedSalt(t *testing.T) {
+	const saltLen = 16
+	path := vaultFile(t)
+	pw := []byte("super secret")
+
+	if _, err := Init(bg, path, pw); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	loaded, err := Load(bg, path, pw)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.cipher == nil {
+		t.Fatal("Load should populate the cached cipher")
+	}
+
+	blob, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read vault: %v", err)
+	}
+	saltBefore := string(blob[:saltLen])
+
+	if _, _, err := loaded.AddProject("p", "", "/tmp/p/.env"); err != nil {
+		t.Fatalf("AddProject: %v", err)
+	}
+	if err := loaded.Save(bg, path, pw); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	blob, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("re-read vault: %v", err)
+	}
+	if string(blob[:saltLen]) != saltBefore {
+		t.Error("salt changed after save: cipher was not reused (key re-derived)")
+	}
+
+	// Sanity: the resaved vault still decrypts with the same passphrase.
+	if _, err := Load(bg, path, pw); err != nil {
+		t.Fatalf("reload after resave: %v", err)
+	}
+}
+
 func TestInitFailsIfExists(t *testing.T) {
 	path := vaultFile(t)
 	pw := []byte("pass")

@@ -39,7 +39,7 @@ func listCmd() *cobra.Command {
 }
 
 func pullCmd() *cobra.Command {
-	var safe, example bool
+	var safe, example, force bool
 	cmd := &cobra.Command{
 		Use:   "pull <project[@env]> [-- command...]",
 		Short: "Write the env's values out to its .env file",
@@ -89,6 +89,15 @@ Flags:
 			case len(wipeCmd) > 0:
 				return wipeAndRun(e.Path, e.Vars, wipeCmd)
 			default:
+				if !force {
+					ok, err := confirmEnvOverwrite(e.Path, e.Vars)
+					if err != nil {
+						return err
+					}
+					if !ok {
+						return fmt.Errorf("pull cancelled")
+					}
+				}
 				if err := project.WriteEnvFile(e.Path, e.Vars); err != nil {
 					return err
 				}
@@ -99,7 +108,48 @@ Flags:
 	}
 	cmd.Flags().BoolVarP(&safe, "safe", "s", false, "write masked values (****) for LLM/teammate sharing")
 	cmd.Flags().BoolVarP(&example, "example", "e", false, "write empty values for .env.example")
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "overwrite the .env without confirming unsynced local edits")
 	return cmd
+}
+
+// confirmEnvOverwrite checks whether the on-disk .env at path holds real
+// values not yet in the vault (unsynced local edits that a real-value pull
+// would silently destroy). If so it prints a diff summary and asks for
+// confirmation. A missing file, a fully masked safe file, or a file that
+// matches the vault returns true without prompting — those are the normal,
+// non-destructive cases. Unattended runs (CALYPSO_PASSPHRASE set) auto-confirm.
+func confirmEnvOverwrite(path string, vaultVars []project.Var) (bool, error) {
+	existing, err := project.ReadEnvFile(path)
+	if err != nil {
+		return true, nil // no readable .env to clobber
+	}
+	if !hasUnsyncedEdits(vaultVars, existing) {
+		return true, nil
+	}
+	c := analysis.DiffCounts(vaultVars, existing)
+	fmt.Fprintf(os.Stderr, "%s has local changes not in the vault (relative to vault: +%d ~%d -%d).\n",
+		path, c.Added, c.Changed, c.Removed)
+	return confirmYesNo(os.Stderr, "Overwrite .env with vault values?", false)
+}
+
+// hasUnsyncedEdits reports whether the on-disk vars contain a real (non-masked)
+// key/value that the vault doesn't already have. Masked placeholder values are
+// ignored so the documented `pull --safe` → `pull` restore round-trip never
+// prompts.
+func hasUnsyncedEdits(vaultVars, fileVars []project.Var) bool {
+	inVault := make(map[string]string, len(vaultVars))
+	for _, v := range vaultVars {
+		inVault[v.Key] = v.Value
+	}
+	for _, fv := range fileVars {
+		if fv.Value == project.SafePlaceholder {
+			continue
+		}
+		if vv, ok := inVault[fv.Key]; !ok || vv != fv.Value {
+			return true
+		}
+	}
+	return false
 }
 
 // wipeAndRun writes real .env, executes the command, and overwrites with safe values.

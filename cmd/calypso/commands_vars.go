@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/yemon/calypso/internal/project"
 )
 
 func setCmd() *cobra.Command {
@@ -28,7 +29,11 @@ func setCmd() *cobra.Command {
 				if eq < 0 {
 					return fmt.Errorf("invalid pair %q, expected KEY=value", kv)
 				}
-				e.Set(strings.TrimSpace(kv[:eq]), kv[eq+1:])
+				key := strings.TrimSpace(kv[:eq])
+				if !project.ValidKey(key) {
+					return fmt.Errorf("invalid key %q: keys must start with a letter or _ and contain only letters, digits, or _", key)
+				}
+				e.Set(key, kv[eq+1:])
 			}
 			v.Touch(p.Name, e.Name)
 			if err := saveAndWarn(ctx, v, pw); err != nil {
@@ -41,7 +46,7 @@ func setCmd() *cobra.Command {
 }
 
 func getCmd() *cobra.Command {
-	var reveal bool
+	var reveal, hint bool
 	cmd := &cobra.Command{
 		Use:   "get <project[@env]> [KEY]",
 		Short: "Show variables (masked unless --reveal)",
@@ -61,16 +66,17 @@ func getCmd() *cobra.Command {
 				if !ok {
 					return fmt.Errorf("key %q not found in %q", args[1], args[0])
 				}
-				fmt.Println(maybeMask(val, reveal))
+				fmt.Println(maybeMask(val, reveal, hint))
 				return nil
 			}
 			for _, kv := range e.Vars {
-				fmt.Printf("%s=%s\n", kv.Key, maybeMask(kv.Value, reveal))
+				fmt.Printf("%s=%s\n", kv.Key, maybeMask(kv.Value, reveal, hint))
 			}
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&reveal, "reveal", false, "show actual values instead of masking")
+	cmd.Flags().BoolVar(&hint, "hint", false, "mask but reveal first/last 2 chars as an identification aid")
 	return cmd
 }
 

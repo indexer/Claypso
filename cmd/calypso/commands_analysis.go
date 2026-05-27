@@ -129,5 +129,8 @@ func cell(val string, present, reveal bool) string {
 	if !present {
 		return "—"
 	}
-	return maybeMask(val, reveal)
+	// Comparison views keep the edge-character hint so differing values are
+	// visually distinguishable; the no-leak fixed-width mask is reserved for
+	// the shareable `get` output.
+	return maybeMask(val, reveal, true)
 }

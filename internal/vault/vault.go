@@ -28,8 +28,9 @@ type Vault struct {
 	Projects  map[string]*project.Project `json:"projects"`
 	CreatedAt string                      `json:"created_at"`
 
-	loadedVersion int   `json:"-"` // 0 for brand-new vaults; otherwise the version read from disk
-	lastBackupErr error `json:"-"` // set by writeUnlocked when auto-backup fails (non-fatal)
+	loadedVersion int            `json:"-"` // 0 for brand-new vaults; otherwise the version read from disk
+	lastBackupErr error          `json:"-"` // set by writeUnlocked when auto-backup fails (non-fatal)
+	cipher        *crypto.Cipher `json:"-"` // derived once on Load/Init, reused by writeUnlocked to skip a second Argon2id
 }
 
 // LastBackupErr returns the most recent auto-backup error, or nil. The save
@@ -39,7 +40,7 @@ func (v *Vault) LastBackupErr() error { return v.lastBackupErr }
 
 var (
 	ErrExists      = errors.New("vault already exists")
-	ErrNotFound    = errors.New("vault not found; run `calypso init` first")
+	ErrNotFound    = errors.New("vault not found; it is created automatically on first use, or run `calypso init`")
 	ErrNoProject   = errors.New("no such project")
 	ErrNoEnv       = errors.New("no such environment")
 	ErrDuplicate   = errors.New("project already registered")
@@ -122,7 +123,7 @@ func Load(ctx context.Context, path string, passphrase []byte) (*Vault, error) {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		plain, err := crypto.Decrypt(passphrase, blob)
+		plain, cipher, err := crypto.Open(passphrase, blob)
 		if err != nil {
 			return err
 		}
@@ -130,6 +131,9 @@ func Load(ctx context.Context, path string, passphrase []byte) (*Vault, error) {
 		if err != nil {
 			return err
 		}
+		// Reuse the salt+key from this decryption when the vault is saved
+		// again in this process, so a load+save cycle derives the key once.
+		loaded.cipher = cipher
 		v = loaded
 		return nil
 	})

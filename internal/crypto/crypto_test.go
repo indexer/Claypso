@@ -141,6 +141,70 @@ func TestDeriveKeyDeterministic(t *testing.T) {
 	}
 }
 
+func TestOpenReturnsCipherThatRoundtrips(t *testing.T) {
+	pass := []byte("correct horse battery staple")
+	plain := []byte("first payload")
+
+	blob, err := Encrypt(pass, plain)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+
+	got, c, err := Open(pass, blob)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if !bytes.Equal(got, plain) {
+		t.Errorf("open roundtrip mismatch: want %q got %q", plain, got)
+	}
+
+	// Re-sealing with the returned Cipher must remain decryptable with the
+	// same passphrase (proving the salt was carried over correctly).
+	resealed, err := c.Seal([]byte("second payload"))
+	if err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	back, err := Decrypt(pass, resealed)
+	if err != nil {
+		t.Fatalf("decrypt resealed: %v", err)
+	}
+	if string(back) != "second payload" {
+		t.Errorf("resealed roundtrip mismatch: got %q", back)
+	}
+}
+
+func TestCipherSealReusesSaltWithFreshNonce(t *testing.T) {
+	pass := []byte("a passphrase")
+	blob, err := Encrypt(pass, []byte("payload"))
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	_, c, err := Open(pass, blob)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+
+	out1, _ := c.Seal([]byte("payload"))
+	out2, _ := c.Seal([]byte("payload"))
+
+	// Salt (first saltLen bytes) is reused — that's the whole point: the key
+	// need not be re-derived.
+	if !bytes.Equal(out1[:saltLen], blob[:saltLen]) {
+		t.Error("Seal should reuse the salt carried by the Cipher")
+	}
+	if !bytes.Equal(out1[:saltLen], out2[:saltLen]) {
+		t.Error("repeated Seal calls should share the salt")
+	}
+	// Nonce (next nonceLen bytes) must differ so identical plaintexts don't
+	// produce identical ciphertexts under the same key.
+	if bytes.Equal(out1[saltLen:saltLen+nonceLen], out2[saltLen:saltLen+nonceLen]) {
+		t.Error("Seal must use a fresh nonce each call")
+	}
+	if bytes.Equal(out1, out2) {
+		t.Error("two seals of the same plaintext should differ (fresh nonce)")
+	}
+}
+
 func TestDeriveKeyDifferentSalt(t *testing.T) {
 	pass := []byte("deterministic test")
 	salt1 := []byte("aaaaaaaaaaaaaaaa")

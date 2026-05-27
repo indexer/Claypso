@@ -228,7 +228,7 @@ encryption strength of your data at rest.
 |----------|--------------------------|--------------------------------------------------|
 | macOS    | Keychain (`security`)    | Built-in                                         |
 | Linux    | libsecret (`secret-tool`)| `apt install libsecret-tools` (or distro equiv.) |
-| Windows  | not yet supported        | use `ENVHUB_PASSPHRASE` env var instead          |
+| Windows  | not yet supported        | use `CALYPSO_PASSPHRASE` env var instead          |
 
 Check what calypso sees:
 
@@ -298,12 +298,12 @@ calypso drift myapp@dev                    # alerts if .env was hand-edited
 If the agent is running in a place where the OS keychain isn't
 available — Codespaces, Gitpod, Coder, a remote ssh box, a cloud agent
 that spins up containers — `keychain save` will fail or be useless.
-Use `ENVHUB_PASSPHRASE` instead. Set it as a workspace secret (NOT in
+Use `CALYPSO_PASSPHRASE` instead. Set it as a workspace secret (NOT in
 a tracked file):
 
 ```bash
 # Set ONCE in your workspace's env-config UI:
-export ENVHUB_PASSPHRASE="your-master-passphrase"
+export CALYPSO_PASSPHRASE="your-master-passphrase"
 
 # Then the agent runs the same commands as above, prompt-free:
 calypso pull myapp@dev -- npm test
@@ -317,11 +317,12 @@ the agent opens, so no prompt is ever needed.
 #### What can the agent see after this setup?
 
 Once the agent can unlock the vault (via keychain or
-`ENVHUB_PASSPHRASE`), it has **the same access you have**:
+`CALYPSO_PASSPHRASE`), it has **the same access you have**:
 
 | Command                          | What the agent sees                                |
 |----------------------------------|----------------------------------------------------|
-| `calypso get myapp KEY`          | Masked value (`sk***23`)                           |
+| `calypso get myapp KEY`          | Masked, fixed-width (`********`)                    |
+| `calypso get myapp KEY --hint`   | Masked with edge hint (`sk****23`)                 |
 | `calypso get myapp KEY --reveal` | **Real value** (`sk-test-abc123`)                  |
 | `calypso pull myapp`             | Writes **real values** to `.env` on disk           |
 | `calypso pull myapp --safe`      | Writes `****` placeholders                         |
@@ -348,12 +349,16 @@ The tool-permission allowlist in your agent is the enforcement point —
 calypso happily prints real values when asked, so the discipline of
 *not* asking has to live in the agent's configuration.
 
-### How it interacts with `ENVHUB_PASSPHRASE`
+### How it interacts with `CALYPSO_PASSPHRASE`
 
-If `ENVHUB_PASSPHRASE` is set, calypso uses it and **skips the keychain
+If `CALYPSO_PASSPHRASE` is set, calypso uses it and **skips the keychain
 entirely** — handy for CI scripts that shouldn't touch the user's
 keychain, and for `keychain save` itself (it stores whatever
-`ENVHUB_PASSPHRASE` provides without re-prompting).
+`CALYPSO_PASSPHRASE` provides without re-prompting).
+
+> **Deprecation:** this variable used to be named `ENVHUB_PASSPHRASE`. The
+> old name is still honored for backward compatibility but prints a warning
+> on use — rename it to `CALYPSO_PASSPHRASE`.
 
 ### Security tradeoffs (read before turning it on)
 
@@ -385,7 +390,7 @@ moves the security boundary, so know what you're trading.
 - ✅ A workstation where you accept that compromise-of-user equals
   compromise-of-secrets (which is usually true regardless).
 - ❌ Shared machines (multiple humans logging in as the same user).
-- ❌ CI runners and remote agents — use `ENVHUB_PASSPHRASE` for the
+- ❌ CI runners and remote agents — use `CALYPSO_PASSPHRASE` for the
   duration of the job instead.
 - ❌ Machines where you run untrusted code as your user (e.g. a
   freshly cloned repo with build scripts you haven't audited).
@@ -557,10 +562,10 @@ calypso completion fish > ~/.config/fish/completions/calypso.fish
 
 ## CI / Scripts
 
-Set the `ENVHUB_PASSPHRASE` environment variable for non-interactive use:
+Set the `CALYPSO_PASSPHRASE` environment variable for non-interactive use:
 
 ```bash
-export ENVHUB_PASSPHRASE="my-master-passphrase"
+export CALYPSO_PASSPHRASE="my-master-passphrase"
 calypso set myapp CI_TOKEN=ghp_123
 calypso pull myapp
 ```
@@ -718,7 +723,7 @@ calypso version                      # print version info
 - **SIGINT safe** — Ctrl+C during entry restores terminal state
 - **Zeroed in memory** after every operation
 - 3 **retry attempts** with increasing delay (500ms → 1s → 1.5s)
-- Supports `ENVHUB_PASSPHRASE` for CI
+- Supports `CALYPSO_PASSPHRASE` for CI
 
 ### Defaults
 

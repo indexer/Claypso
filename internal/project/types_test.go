@@ -2,6 +2,21 @@ package project
 
 import "testing"
 
+func TestValidKey(t *testing.T) {
+	valid := []string{"KEY", "KEY1", "_KEY", "a", "API_KEY_2", "lower_case"}
+	for _, k := range valid {
+		if !ValidKey(k) {
+			t.Errorf("ValidKey(%q) = false, want true", k)
+		}
+	}
+	invalid := []string{"", "1KEY", "KEY-1", "FOO BAR", "KEY=", "a.b", " key", "ünïcode"}
+	for _, k := range invalid {
+		if ValidKey(k) {
+			t.Errorf("ValidKey(%q) = true, want false", k)
+		}
+	}
+}
+
 func TestGetSetUnset(t *testing.T) {
 	e := &Environment{Name: "default"}
 

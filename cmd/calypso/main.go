@@ -57,7 +57,7 @@ func main() {
 // openVault loads the vault. Tries keychain first, then interactive prompt
 // with retries. Auto-creates the vault if it doesn't exist.
 func openVault(ctx context.Context) (*vault.Vault, []byte, error) {
-	usingEnv := os.Getenv("ENVHUB_PASSPHRASE") != ""
+	usingEnv := unattended()
 
 	if !usingEnv && keychain.Available() {
 		if v, pw, ok := tryKeychainUnlock(ctx); ok {
@@ -88,7 +88,8 @@ func openVault(ctx context.Context) (*vault.Vault, []byte, error) {
 
 	clearBytes(pw)
 	if fromEnv {
-		return nil, nil, fmt.Errorf("wrong passphrase (from ENVHUB_PASSPHRASE)")
+		_, name, _ := passphraseFromEnv()
+		return nil, nil, fmt.Errorf("wrong passphrase (from %s)", name)
 	}
 	return retryLoad(ctx)
 }
@@ -136,7 +137,7 @@ func retryLoad(ctx context.Context) (*vault.Vault, []byte, error) {
 
 // offerKeychainSave asks once whether to save the passphrase in the OS keychain.
 func offerKeychainSave(pw []byte) {
-	if os.Getenv("ENVHUB_PASSPHRASE") != "" {
+	if unattended() {
 		return
 	}
 	if _, err := keychain.Retrieve(); err == nil {

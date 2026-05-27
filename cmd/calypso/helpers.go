@@ -16,7 +16,36 @@ import (
 
 const (
 	minPassphraseLen = 8
+
+	// canonicalPassphraseEnv is the supported name for the unattended
+	// passphrase. legacyPassphraseEnv is the pre-rename name (the tool used to
+	// be "envhub"); it is still honored for backward compatibility with a
+	// deprecation notice.
+	canonicalPassphraseEnv = "CALYPSO_PASSPHRASE"
+	legacyPassphraseEnv    = "ENVHUB_PASSPHRASE"
 )
+
+// passphraseEnvNames lists the environment variables consulted for an
+// unattended passphrase, in priority order.
+var passphraseEnvNames = []string{canonicalPassphraseEnv, legacyPassphraseEnv}
+
+// passphraseFromEnv returns the unattended passphrase and the name of the
+// variable it came from. found is false when none is set.
+func passphraseFromEnv() (value, name string, found bool) {
+	for _, n := range passphraseEnvNames {
+		if v := os.Getenv(n); v != "" {
+			return v, n, true
+		}
+	}
+	return "", "", false
+}
+
+// unattended reports whether a passphrase env var is set — i.e. calypso is
+// running non-interactively, so confirmation prompts auto-accept.
+func unattended() bool {
+	_, _, ok := passphraseFromEnv()
+	return ok
+}
 
 // clearBytes securely zeroes a byte slice in memory.
 func clearBytes(b []byte) {
@@ -29,8 +58,12 @@ func clearBytes(b []byte) {
 // fromEnv is true when the password came from ENVHUB_PASSPHRASE.
 func promptPassphrase(prompt string) ([]byte, bool, error) {
 	fmt.Fprint(os.Stderr, prompt)
-	if p := os.Getenv("ENVHUB_PASSPHRASE"); p != "" {
-		fmt.Fprintln(os.Stderr, "(using ENVHUB_PASSPHRASE)")
+	if p, name, ok := passphraseFromEnv(); ok {
+		fmt.Fprintf(os.Stderr, "(using %s)\n", name)
+		if name == legacyPassphraseEnv {
+			fmt.Fprintf(os.Stderr, "warning: %s is deprecated; rename it to %s.\n",
+				legacyPassphraseEnv, canonicalPassphraseEnv)
+		}
 		return []byte(p), true, nil
 	}
 
@@ -94,7 +127,7 @@ func readNewPassphrase() ([]byte, error) {
 // confirmYesNo prompts the user. In unattended mode (ENVHUB_PASSPHRASE set),
 // returns true immediately.
 func confirmYesNo(out io.Writer, prompt string, defaultYes bool) (bool, error) {
-	if os.Getenv("ENVHUB_PASSPHRASE") != "" {
+	if unattended() {
 		return true, nil
 	}
 	suffix := "[y/N]"
@@ -140,10 +173,20 @@ func saveAndWarn(ctx context.Context, v vaultSaver, pw []byte) error {
 	return nil
 }
 
-// maybeMask shows first 2 + last 2 chars unless reveal is true.
-func maybeMask(val string, reveal bool) string {
+// maskFixed is the fixed-width mask used for the default (shareable) view. It
+// deliberately reveals neither the value's length nor any of its characters.
+const maskFixed = "********"
+
+// maybeMask renders a value for display. With reveal it returns the value
+// verbatim. Otherwise it masks: by default to a fixed width that leaks nothing,
+// or — with hint — showing the first and last two characters as an
+// identification aid (which does leak length and 4 chars, so it's opt-in).
+func maybeMask(val string, reveal, hint bool) string {
 	if reveal {
 		return val
+	}
+	if !hint {
+		return maskFixed
 	}
 	if len(val) <= 4 {
 		return "****"
@@ -159,14 +202,25 @@ func maybeMask(val string, reveal bool) string {
 	return string(b)
 }
 
-// stripSensitiveEnv removes ENVHUB_PASSPHRASE from the environment slice
-// before passing it to child processes.
+// stripSensitiveEnv removes any passphrase env var (CALYPSO_PASSPHRASE and the
+// legacy ENVHUB_PASSPHRASE) from the environment slice before passing it to
+// child processes, so a `pull -- cmd` never leaks the master passphrase.
 func stripSensitiveEnv(env []string) []string {
 	out := make([]string, 0, len(env))
 	for _, kv := range env {
-		if len(kv) < 18 || kv[:18] != "ENVHUB_PASSPHRASE=" {
-			out = append(out, kv)
+		if isPassphraseAssignment(kv) {
+			continue
 		}
+		out = append(out, kv)
 	}
 	return out
+}
+
+func isPassphraseAssignment(kv string) bool {
+	for _, n := range passphraseEnvNames {
+		if strings.HasPrefix(kv, n+"=") {
+			return true
+		}
+	}
+	return false
 }

@@ -21,6 +21,27 @@ type Var struct {
 	Value string `json:"value"`
 }
 
+// ValidKey reports whether s is a usable env var name: a letter or underscore
+// followed by letters, digits, or underscores. Enforcing this keeps generated
+// .env files parseable and the keys safe to reference from a shell.
+func ValidKey(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		isLetter := (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_'
+		isDigit := c >= '0' && c <= '9'
+		if i == 0 && !isLetter {
+			return false
+		}
+		if !isLetter && !isDigit {
+			return false
+		}
+	}
+	return true
+}
+
 // Environment is one named variant of a project (dev / staging / prod /
 // default). It holds the .env path for that variant and its variables.
 type Environment struct {

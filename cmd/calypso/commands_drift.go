@@ -110,8 +110,8 @@ func printDrift(r analysis.DriftReport, details, reveal bool) {
 		}
 		fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n",
 			e.Key,
-			maybeMask(e.VaultVal, reveal),
-			maybeMask(e.DiskVal, reveal),
+			maybeMask(e.VaultVal, reveal, true),
+			maybeMask(e.DiskVal, reveal, true),
 			e.Kind)
 	}
 	w.Flush()

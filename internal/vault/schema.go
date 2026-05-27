@@ -59,7 +59,17 @@ func (v *Vault) writeUnlocked(ctx context.Context, path string, passphrase []byt
 	if err != nil {
 		return err
 	}
-	blob, err := crypto.Encrypt(passphrase, plain)
+	// Derive the key at most once per process: Load/Init populate v.cipher,
+	// and every subsequent save reuses it (same salt, fresh nonce). A nil
+	// cipher means this is a brand-new vault saved without a prior Load.
+	if v.cipher == nil {
+		c, err := crypto.NewCipher(passphrase)
+		if err != nil {
+			return err
+		}
+		v.cipher = c
+	}
+	blob, err := v.cipher.Seal(plain)
 	if err != nil {
 		return err
 	}
