@@ -46,3 +46,6 @@ release:
     name: Claypso
   draft: false
   prerelease: auto
+  # Delete same-named assets before uploading so re-running a release on an
+  # existing tag doesn't fail with "422 already_exists".
+  replace_existing_artifacts: true
