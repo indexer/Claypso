@@ -77,12 +77,18 @@ func atomicWrite(path string, blob []byte) error {
 }
 
 // withLock acquires the advisory lock on the vault and runs fn while it is held.
-func withLock(vaultPath string, fn func() error) error {
-	f, err := lockfile.Lock(lockPath(vaultPath))
-	if err != nil {
-		return fmt.Errorf("vault locked by another process: %w", err)
+// The unlock (and underlying close) error is surfaced only when fn itself
+// succeeded, so a release failure never masks the caller's primary error.
+func withLock(vaultPath string, fn func() error) (err error) {
+	f, lockErr := lockfile.Lock(lockPath(vaultPath))
+	if lockErr != nil {
+		return fmt.Errorf("vault locked by another process: %w", lockErr)
 	}
-	defer lockfile.Unlock(f)
+	defer func() {
+		if unlockErr := lockfile.Unlock(f); unlockErr != nil && err == nil {
+			err = unlockErr
+		}
+	}()
 	return fn()
 }
 

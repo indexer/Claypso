@@ -67,7 +67,12 @@ func Serve(v VaultReader, port int) error {
 		return fmt.Errorf("dashboard cannot bind localhost:%d: %w", port, err)
 	}
 	fmt.Printf("calypso dashboard → http://127.0.0.1:%d  (Ctrl+C to stop)\n", port)
-	srv := &http.Server{Handler: newHandler(v)}
+	srv := &http.Server{
+		Handler:           newHandler(v),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+	}
 	return serveUntilSignal(srv, ln)
 }
 

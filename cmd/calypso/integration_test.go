@@ -100,7 +100,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	}
 
 	// 6. Pull (write to .env)
-	stdout, stderr, err = runCalypso(t, bin, pw, "--vault", vaultPath, "pull", "myapp")
+	_, stderr, err = runCalypso(t, bin, pw, "--vault", vaultPath, "pull", "myapp")
 	if err != nil {
 		t.Fatalf("pull: %v\nstderr: %s", err, stderr)
 	}

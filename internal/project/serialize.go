@@ -66,5 +66,5 @@ func WriteSafeEnvFile(path string, vars []Var) error {
 
 // WriteExampleEnvFile writes a .env.example template with empty values.
 func WriteExampleEnvFile(path string, vars []Var) error {
-	return os.WriteFile(path, []byte(SerializeExampleEnv(vars)), 0o644)
+	return os.WriteFile(path, []byte(SerializeExampleEnv(vars)), 0o644) //nolint:gosec // non-secret template, world-readable is intentional
 }

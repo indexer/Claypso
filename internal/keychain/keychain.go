@@ -10,19 +10,30 @@ const ServiceName = "calypso"
 // ErrNotAvailable is returned when no supported keychain backend is found.
 var ErrNotAvailable = fmt.Errorf("no keychain backend available; install libsecret-tools (Linux) or use macOS Keychain")
 
+// storeFn, retrieveFn and forgetFn are indirection seams over the
+// platform-specific implementations. The exported wrappers route through these
+// vars so tests can substitute spies and verify the delegation contract on
+// every OS (see TestExportedWrappersDelegate). Production code never reassigns
+// them.
+var (
+	storeFn    = store
+	retrieveFn = retrieve
+	forgetFn   = forget
+)
+
 // Store saves the passphrase in the OS keychain.
 func Store(passphrase []byte) error {
-	return store(passphrase)
+	return storeFn(passphrase)
 }
 
 // Retrieve fetches the passphrase from the OS keychain.
 func Retrieve() ([]byte, error) {
-	return retrieve()
+	return retrieveFn()
 }
 
 // Forget removes the passphrase from the OS keychain.
 func Forget() error {
-	return forget()
+	return forgetFn()
 }
 
 // Available returns true if a keychain backend is usable.

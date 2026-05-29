@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"time"
+
 	"github.com/spf13/cobra"
 	"github.com/yemon/calypso/internal/crypto"
 	"github.com/yemon/calypso/internal/keychain"
 	"github.com/yemon/calypso/internal/vault"
-	"os"
-	"time"
 )
 
 const maxRetries = 3
@@ -106,7 +107,9 @@ func tryKeychainUnlock(ctx context.Context) (*vault.Vault, []byte, bool) {
 	}
 	clearBytes(pw)
 	if err == crypto.ErrDecrypt {
-		keychain.Forget()
+		if ferr := keychain.Forget(); ferr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: clearing stale keychain entry failed: %v\n", ferr)
+		}
 	}
 	return nil, nil, false
 }

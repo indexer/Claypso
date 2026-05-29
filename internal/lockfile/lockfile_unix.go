@@ -17,7 +17,7 @@ func Lock(path string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil { //nolint:gosec // fd fits in int on supported platforms
 		f.Close()
 		return nil, err
 	}
@@ -25,7 +25,7 @@ func Lock(path string) (*os.File, error) {
 }
 
 func Unlock(f *os.File) error {
-	unlockErr := syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	unlockErr := syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:gosec // fd fits in int on supported platforms
 	closeErr := f.Close()
 	if unlockErr != nil {
 		return unlockErr

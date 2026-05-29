@@ -22,7 +22,7 @@ const (
 	// be "envhub"); it is still honored for backward compatibility with a
 	// deprecation notice.
 	canonicalPassphraseEnv = "CALYPSO_PASSPHRASE"
-	legacyPassphraseEnv    = "ENVHUB_PASSPHRASE"
+	legacyPassphraseEnv    = "ENVHUB_PASSPHRASE" //nolint:gosec // env var name, not a credential
 )
 
 // passphraseEnvNames lists the environment variables consulted for an
@@ -77,7 +77,7 @@ func promptPassphrase(prompt string) ([]byte, bool, error) {
 	}
 	resCh := make(chan result, 1)
 	go func() {
-		pw, err := term.ReadPassword(int(os.Stdin.Fd()))
+		pw, err := term.ReadPassword(int(os.Stdin.Fd())) //nolint:gosec // fd fits in int on supported platforms
 		resCh <- result{pw, err}
 	}()
 

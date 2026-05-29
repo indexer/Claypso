@@ -5,7 +5,7 @@ every project's environment. **Nothing ever leaves your machine.**
 
 ## Install
 
-Requires **Go 1.22+**.
+Requires **Go 1.26+**.
 
 ```bash
 git clone https://github.com/yemon/calypso.git
@@ -20,9 +20,9 @@ Verify:
 
 ```bash
 calypso version
-# calypso 1.0.0
+# calypso 1.0.6
 #   commit: abc1234
-#   go:     go1.22.1
+#   go:     go1.26.3
 ```
 
 ## Getting Started (step by step)

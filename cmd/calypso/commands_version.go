@@ -2,9 +2,10 @@ package main
 
 import (
 	"fmt"
-	"github.com/spf13/cobra"
 	"runtime"
 	"runtime/debug"
+
+	"github.com/spf13/cobra"
 )
 
 // Populated via -ldflags at build time.

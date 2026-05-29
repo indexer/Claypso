@@ -16,10 +16,6 @@ import (
 // from a few accidental saves, small enough not to swamp the directory.
 const defaultBackupRetain = 10
 
-// backupExt is the file extension used for both schema-upgrade backups
-// (vault.enc.v1.bak) and the timestamped auto-backups (vault.enc.bak).
-const backupExt = ".bak"
-
 // backupTimeFormat is a compact, lexically-sortable UTC timestamp used in
 // auto-backup filenames. Includes nanoseconds so rapid-fire saves don't
 // collide on the same filename and silently overwrite each other.

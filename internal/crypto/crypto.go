@@ -7,9 +7,10 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
+
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/nacl/secretbox"
-	"io"
 )
 
 const (

@@ -39,7 +39,11 @@ func forget() error {
 	).Run()
 }
 
+// lookPath is a seam over exec.LookPath so tests can pin the exact binary name
+// available() probes for without depending on what is installed on PATH.
+var lookPath = exec.LookPath
+
 func available() bool {
-	_, err := exec.LookPath("security")
+	_, err := lookPath("security")
 	return err == nil
 }

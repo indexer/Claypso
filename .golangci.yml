@@ -1,32 +1,42 @@
+version: "2"
 run:
-  timeout: 5m
   tests: true
-
 linters:
   enable:
-    - errcheck
-    - gosimple
-    - govet
-    - ineffassign
-    - staticcheck
-    - unused
     - gosec
     - misspell
-    - gofmt
-    - goimports
   disable:
     - exhaustruct
-
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - gosec
-        - errcheck
-
-linters-settings:
-  gosec:
-    excludes:
-      - G204  # subprocess launching (we use exec for wipe + keychain)
-  errcheck:
-    check-blank: true
+  settings:
+    errcheck:
+      check-blank: true
+    gosec:
+      excludes:
+        - G204  # subprocess via exec (wipe + keychain helpers); inputs are not attacker-controlled
+        - G703  # path-traversal taint: N/A for a local CLI — output paths are user-chosen (args) or vault-internal
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+          - gosec
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
