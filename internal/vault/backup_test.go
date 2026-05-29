@@ -90,6 +90,43 @@ func TestAutoBackup_RetentionZeroDisables(t *testing.T) {
 	}
 }
 
+func TestBackupBeforeUpgrade(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vault.enc")
+	bak := path + ".v1.bak"
+
+	// No source file yet → no-op, no error, no backup written.
+	if err := backupBeforeUpgrade(path, 1); err != nil {
+		t.Fatalf("backupBeforeUpgrade with no source: %v", err)
+	}
+	if _, err := os.Stat(bak); !os.IsNotExist(err) {
+		t.Error("no backup should be created when the source is absent")
+	}
+
+	// With a source file → a backup with the source content is created.
+	if err := os.WriteFile(path, []byte("original"), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	if err := backupBeforeUpgrade(path, 1); err != nil {
+		t.Fatalf("backupBeforeUpgrade: %v", err)
+	}
+	if got, err := os.ReadFile(bak); err != nil || string(got) != "original" {
+		t.Fatalf("backup content = %q (err=%v), want %q", got, err, "original")
+	}
+
+	// Calling again must NOT overwrite the existing backup (the first one is
+	// the most useful for recovery).
+	if err := os.WriteFile(path, []byte("changed"), 0o600); err != nil {
+		t.Fatalf("rewrite source: %v", err)
+	}
+	if err := backupBeforeUpgrade(path, 1); err != nil {
+		t.Fatalf("backupBeforeUpgrade (existing): %v", err)
+	}
+	if got, _ := os.ReadFile(bak); string(got) != "original" {
+		t.Errorf("existing backup should be preserved, got %q", got)
+	}
+}
+
 // TestRestoreBackupRejectsTraversal confirms RestoreBackup only accepts a bare
 // filename that is actually one of our backups — never a path that escapes the
 // backup directory.

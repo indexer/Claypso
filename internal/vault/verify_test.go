@@ -18,6 +18,42 @@ func TestVerify_HealthyVaultHasNoFindings(t *testing.T) {
 	}
 }
 
+func TestVerifyAndRepair(t *testing.T) {
+	v := New()
+	v.CreatedAt = "" // fixable
+	v.Projects["alpha"] = &project.Project{
+		Name: "", // fixable: name doesn't match map key
+		Envs: map[string]*project.Environment{
+			"default": {Name: "", Path: "/abs/.env", UpdatedAt: ""},
+		},
+	}
+	pre, fixes, post := VerifyAndRepair(bg, v)
+	if len(pre) == 0 {
+		t.Error("expected pre-repair findings")
+	}
+	if len(fixes) == 0 {
+		t.Error("expected fixes to be applied")
+	}
+	for _, f := range post {
+		if f.Severity == "error" {
+			t.Errorf("error-severity finding remains after repair: %s", f.String())
+		}
+	}
+}
+
+func TestFindingString(t *testing.T) {
+	f := Finding{Severity: "error", Where: "alpha@default", Message: "boom", Fixable: true}
+	s := f.String()
+	for _, want := range []string{"ERROR", "alpha@default", "boom", "[fixable]"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("Finding.String()=%q should contain %q", s, want)
+		}
+	}
+	if strings.Contains((Finding{Severity: "warning", Where: "x", Message: "m"}).String(), "[fixable]") {
+		t.Error("a non-fixable finding must not be marked [fixable]")
+	}
+}
+
 func TestRepair_DedupesDuplicateKeys(t *testing.T) {
 	v := New()
 	_, e, err := v.AddProject("alpha", "", "/tmp/alpha/.env")

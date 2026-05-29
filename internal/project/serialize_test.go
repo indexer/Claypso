@@ -159,6 +159,21 @@ func TestWriteEnvFileAtomicNoTemp(t *testing.T) {
 	}
 }
 
+func TestAtomicWriteFileCleansTempOnRenameFailure(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, ".env")
+	// Make the target a directory so renaming the temp file onto it fails.
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	if err := atomicWriteFile(target, []byte("x"), 0o600); err == nil {
+		t.Fatal("atomicWriteFile should fail when the target is a directory")
+	}
+	if _, err := os.Stat(target + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("temp file should be cleaned up after a rename failure (stat err=%v)", err)
+	}
+}
+
 func TestSerializeSafeEnv(t *testing.T) {
 	vars := []Var{
 		{Key: "DB_HOST", Value: "localhost"},

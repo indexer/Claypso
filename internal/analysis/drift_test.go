@@ -8,6 +8,21 @@ import (
 	"github.com/yemon/calypso/internal/project"
 )
 
+func TestDriftKindString(t *testing.T) {
+	cases := map[DriftKind]string{
+		DriftSame:        "same",
+		DriftChanged:     "changed",
+		DriftOnlyInVault: "only in vault",
+		DriftOnlyOnDisk:  "only on disk",
+		DriftKind(99):    "?",
+	}
+	for k, want := range cases {
+		if got := k.String(); got != want {
+			t.Errorf("DriftKind(%d).String() = %q, want %q", int(k), got, want)
+		}
+	}
+}
+
 // withFakeDisk swaps in a fake disk reader for the duration of the test
 // and restores the real one on cleanup. Lets us test drift without
 // touching the filesystem.

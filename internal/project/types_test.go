@@ -156,6 +156,18 @@ func TestProjectEnvLifecycle(t *testing.T) {
 	}
 }
 
+func TestProjectEnvAccessor(t *testing.T) {
+	p := &Project{Name: "app", Envs: map[string]*Environment{
+		"dev": {Name: "dev"},
+	}}
+	if e, ok := p.Env("dev"); !ok || e == nil || e.Name != "dev" {
+		t.Errorf("Env(dev) = %v, %v; want the dev env", e, ok)
+	}
+	if e, ok := p.Env("missing"); ok || e != nil {
+		t.Errorf("Env(missing) = %v, %v; want nil, false", e, ok)
+	}
+}
+
 func TestKeys(t *testing.T) {
 	e := &Environment{Name: "default"}
 	e.Set("B", "2")

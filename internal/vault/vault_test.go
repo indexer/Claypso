@@ -280,3 +280,47 @@ func TestSaveAtomic(t *testing.T) {
 		t.Error("temp file should not exist after save + rename")
 	}
 }
+
+func TestAtomicWriteCleansTempOnRenameFailure(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "vault.enc")
+	// Make the target a directory so renaming the temp file onto it fails.
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	if err := atomicWrite(target, []byte("data")); err == nil {
+		t.Fatal("atomicWrite should fail when the target is a directory")
+	}
+	if _, err := os.Stat(target + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("temp file should be cleaned up after a rename failure (stat err=%v)", err)
+	}
+}
+
+func TestVaultClose(t *testing.T) {
+	// A fresh in-memory vault has no cipher; Close must not panic.
+	New().Close()
+
+	// After a Load the cipher is populated; Close clears its key without panic.
+	path := vaultFile(t)
+	pw := []byte("pw")
+	if _, err := Init(bg, path, pw); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	loaded, err := Load(bg, path, pw)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	loaded.Close()
+}
+
+func TestDefaultPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	got, err := DefaultPath()
+	if err != nil {
+		t.Fatalf("DefaultPath: %v", err)
+	}
+	if want := filepath.Join(dir, ".calypso", "vault.enc"); got != want {
+		t.Errorf("DefaultPath = %q, want %q", got, want)
+	}
+}

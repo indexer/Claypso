@@ -5,6 +5,18 @@ import (
 	"testing"
 )
 
+func TestIsPartialExport(t *testing.T) {
+	if !IsPartialExport([]byte(`{"kind":"project","project":{}}`)) {
+		t.Error("a partial-export envelope should be detected")
+	}
+	if IsPartialExport([]byte(`{"version":2,"projects":{}}`)) {
+		t.Error("a full vault must not be detected as a partial export")
+	}
+	if IsPartialExport([]byte("not json")) {
+		t.Error("invalid JSON must not be detected as a partial export")
+	}
+}
+
 func TestExportImportProject_SingleEnv(t *testing.T) {
 	srcPath := vaultFile(t)
 	pw := []byte("pw")
