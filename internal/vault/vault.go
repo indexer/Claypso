@@ -108,12 +108,35 @@ func nowStamp() string { return time.Now().UTC().Format(time.RFC3339) }
 // here, keeping the write-then-rename contract in one place.
 func atomicWrite(path string, blob []byte) error {
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, blob, 0o600); err != nil {
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(blob); err != nil {
+		f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	// Flush contents to stable storage before the rename, so a crash can't leave
+	// the renamed-into-place vault with unwritten (zero/partial) data.
+	if err := f.Sync(); err != nil {
+		f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp) // don't leave a stale temp behind on failure
 		return err
+	}
+	// Best-effort: fsync the directory so the rename entry itself is durable.
+	// Directory fsync isn't supported everywhere (e.g. Windows), so ignore errors.
+	if d, derr := os.Open(filepath.Dir(path)); derr == nil {
+		_ = d.Sync() //nolint:errcheck // best-effort: directory fsync is unsupported on some platforms (e.g. Windows)
+		_ = d.Close()
 	}
 	return nil
 }
