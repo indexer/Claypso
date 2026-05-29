@@ -8,15 +8,20 @@ import (
 	"os/exec"
 )
 
+// execCommand is a seam over exec.Command so tests can substitute a fake
+// secret-tool (via the TestHelperProcess pattern) without a live libsecret
+// backend on PATH — mirroring the lookPath seam used by available().
+var execCommand = exec.Command
+
 func store(passphrase []byte) error {
-	cmd := exec.Command("secret-tool", "store", "--label=calypso vault passphrase", "app", ServiceName)
+	cmd := execCommand("secret-tool", "store", "--label=calypso vault passphrase", "app", ServiceName)
 	cmd.Stdin = bytes.NewReader(passphrase)
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
 func retrieve() ([]byte, error) {
-	out, err := exec.Command("secret-tool", "lookup", "app", ServiceName).Output()
+	out, err := execCommand("secret-tool", "lookup", "app", ServiceName).Output()
 	if err != nil {
 		return nil, err
 	}
@@ -24,7 +29,7 @@ func retrieve() ([]byte, error) {
 }
 
 func forget() error {
-	return exec.Command("secret-tool", "clear", "app", ServiceName).Run()
+	return execCommand("secret-tool", "clear", "app", ServiceName).Run()
 }
 
 // lookPath is a seam over exec.LookPath so tests can pin the exact binary name

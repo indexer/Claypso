@@ -3,6 +3,9 @@
 package keychain
 
 import (
+	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"testing"
 )
@@ -62,13 +65,90 @@ func TestLinuxAvailableExportedMatchesSeam(t *testing.T) {
 	}
 }
 
-// TestLinuxStoreRetrieveForgetNeedLiveBackend documents that the actual
-// store/retrieve/forget round-trip is intentionally not exercised here: it
-// would shell out to `secret-tool`, which requires a real libsecret backend
-// and a D-Bus session, and would write a credential into the developer's /
-// CI runner's keyring. We keep CI hermetic by skipping it. (Delegation of the
-// exported wrappers is covered cross-platform in keychain_test.go.)
-func TestLinuxStoreRetrieveForgetNeedLiveBackend(t *testing.T) {
-	t.Skip("store/retrieve/forget require a live libsecret/D-Bus keyring; " +
-		"skipped to keep the test hermetic and avoid writing real secrets")
+// fakeSecretTool replaces the execCommand seam with one that re-executes this
+// test binary as a stand-in `secret-tool`, controlled by env vars. It returns
+// a getter for the (name + args) the code under test invoked, so we can assert
+// the command was constructed correctly. This exercises store/retrieve/forget
+// hermetically — no live libsecret/D-Bus and no real credential written.
+func fakeSecretTool(t *testing.T, mode string) func() []string {
+	t.Helper()
+	orig := execCommand
+	var got []string
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		got = append([]string{name}, args...)
+		helperArgs := append([]string{"-test.run=TestHelperProcess", "--", name}, args...)
+		c := exec.Command(os.Args[0], helperArgs...) //nolint:gosec // os.Args[0] is the test binary
+		c.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1", "MOCK_MODE="+mode)
+		return c
+	}
+	t.Cleanup(func() { execCommand = orig })
+	return func() []string { return got }
+}
+
+// TestHelperProcess is not a real test: when GO_WANT_HELPER_PROCESS=1 it acts
+// as a fake secret-tool. os.Exit short-circuits the test framework so the
+// parent only sees what we write here (e.g. retrieve()'s captured stdout).
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	switch os.Getenv("MOCK_MODE") {
+	case "lookup":
+		fmt.Fprintln(os.Stdout, "s3cr3t") // secret-tool prints the value + a trailing newline
+	case "store":
+		_, _ = io.Copy(io.Discard, os.Stdin) // secret-tool store reads the secret from stdin
+	case "fail":
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func TestLinuxStore(t *testing.T) {
+	getArgs := fakeSecretTool(t, "store")
+	if err := store([]byte("hunter2")); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	args := getArgs()
+	if len(args) < 3 || args[0] != "secret-tool" || args[1] != "store" || args[len(args)-1] != ServiceName {
+		t.Errorf("store ran unexpected command: %v", args)
+	}
+}
+
+func TestLinuxRetrieveTrimsTrailingNewline(t *testing.T) {
+	getArgs := fakeSecretTool(t, "lookup")
+	got, err := retrieve()
+	if err != nil {
+		t.Fatalf("retrieve: %v", err)
+	}
+	if string(got) != "s3cr3t" {
+		t.Errorf("retrieve = %q, want %q (trailing newline trimmed)", got, "s3cr3t")
+	}
+	if args := getArgs(); args[1] != "lookup" || args[len(args)-1] != ServiceName {
+		t.Errorf("retrieve ran unexpected command: %v", args)
+	}
+}
+
+func TestLinuxForget(t *testing.T) {
+	getArgs := fakeSecretTool(t, "ok") // any non-fail mode exits 0
+	if err := forget(); err != nil {
+		t.Fatalf("forget: %v", err)
+	}
+	if args := getArgs(); args[1] != "clear" || args[len(args)-1] != ServiceName {
+		t.Errorf("forget ran unexpected command: %v", args)
+	}
+}
+
+func TestLinuxStoreRetrieveForgetSurfaceErrors(t *testing.T) {
+	fakeSecretTool(t, "fail")
+	if err := store([]byte("x")); err == nil {
+		t.Error("store should surface a secret-tool failure")
+	}
+	fakeSecretTool(t, "fail")
+	if _, err := retrieve(); err == nil {
+		t.Error("retrieve should surface a secret-tool failure")
+	}
+	fakeSecretTool(t, "fail")
+	if err := forget(); err == nil {
+		t.Error("forget should surface a secret-tool failure")
+	}
 }
