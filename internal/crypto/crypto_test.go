@@ -218,18 +218,19 @@ func TestDeriveKeyDifferentSalt(t *testing.T) {
 	}
 }
 
-func TestCipherClearZeroesKey(t *testing.T) {
+func TestCipherClearDestroysKey(t *testing.T) {
 	c, err := NewCipher([]byte("passphrase for clear test"))
 	if err != nil {
 		t.Fatalf("NewCipher: %v", err)
+	}
+	if !c.key.IsAlive() {
+		t.Fatal("key buffer should be alive after NewCipher")
 	}
 	if _, err := c.Seal([]byte("payload")); err != nil {
 		t.Fatalf("Seal before Clear: %v", err)
 	}
 	c.Clear()
-	for i, b := range c.key {
-		if b != 0 {
-			t.Fatalf("Clear should zero the derived key; byte %d = %d", i, b)
-		}
+	if c.key.IsAlive() {
+		t.Error("Clear should destroy the locked key buffer (wipe + unlock + free)")
 	}
 }

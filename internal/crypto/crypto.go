@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/awnumar/memguard"
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/nacl/secretbox"
 )
@@ -68,24 +69,32 @@ func Decrypt(passphrase, blob []byte) ([]byte, error) {
 // fresh random nonce on every call. This is what lets a single CLI invocation
 // decrypt the vault and later re-encrypt it without a second key derivation.
 type Cipher struct {
-	key  []byte // keyLen bytes; zero with Clear() when no longer needed
-	salt []byte // saltLen bytes, owned by this Cipher
+	key  *memguard.LockedBuffer // 32-byte derived key in mlock'd, guard-paged, off-heap memory
+	salt []byte                 // saltLen bytes, owned by this Cipher
 }
 
-// Clear zeroes the derived key. Call it when the Cipher is no longer needed —
-// e.g. a long-lived read-only holder like the dashboard that decrypts once and
-// never re-encrypts. After Clear the Cipher must not be used to Seal again.
+// newCipher moves a freshly derived key into a memguard LockedBuffer (mlock'd
+// so it never reaches swap, guard-paged, and wiped on Destroy) and wipes the
+// source slice. Argon2id's large scratch buffer is left unlocked — it isn't
+// the secret and locking 128 MiB would be costly and fragile.
+func newCipher(key, salt []byte) *Cipher {
+	return &Cipher{key: memguard.NewBufferFromBytes(key), salt: salt}
+}
+
+// Clear destroys the locked key buffer (wipe + unlock + free). Call it when the
+// Cipher is no longer needed — e.g. the read-only dashboard, which decrypts
+// once and never re-encrypts. After Clear the Cipher must not Seal again.
 func (c *Cipher) Clear() {
-	if c != nil {
-		Wipe(c.key)
+	if c != nil && c.key != nil {
+		c.key.Destroy()
 	}
 }
 
-// sealKey copies the (slice) key into a fixed-size array for secretbox, which
-// requires a *[32]byte. The caller must Wipe the returned array when done.
+// sealKey copies the key into a fixed-size array for secretbox, which requires
+// a *[32]byte. The caller must Wipe the returned array when done.
 func (c *Cipher) sealKey() [keyLen]byte {
 	var k [keyLen]byte
-	copy(k[:], c.key)
+	copy(k[:], c.key.Bytes())
 	return k
 }
 
@@ -96,7 +105,7 @@ func NewCipher(passphrase []byte) (*Cipher, error) {
 	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
 		return nil, fmt.Errorf("generating salt: %w", err)
 	}
-	return &Cipher{key: DeriveKey(passphrase, salt), salt: salt}, nil
+	return newCipher(DeriveKey(passphrase, salt), salt), nil
 }
 
 // Open decrypts a self-describing blob and returns the plaintext together with
@@ -113,12 +122,13 @@ func Open(passphrase, blob []byte) ([]byte, *Cipher, error) {
 	copy(nonce[:], blob[saltLen:saltLen+nonceLen])
 	ciphertext := blob[saltLen+nonceLen:]
 
-	c := &Cipher{key: DeriveKey(passphrase, salt), salt: salt}
+	c := newCipher(DeriveKey(passphrase, salt), salt)
 
 	k := c.sealKey()
 	defer Wipe(k[:])
 	plaintext, ok := secretbox.Open(nil, ciphertext, &nonce, &k)
 	if !ok {
+		c.key.Destroy() // don't leak a locked buffer on the wrong-passphrase path
 		return nil, nil, ErrDecrypt
 	}
 	return plaintext, c, nil
