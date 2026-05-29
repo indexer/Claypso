@@ -1,6 +1,71 @@
 package project
 
-import "testing"
+import (
+	"slices"
+	"strings"
+	"testing"
+)
+
+func TestUnsetPreservesOrder(t *testing.T) {
+	e := &Environment{Name: "default"}
+	for _, k := range []string{"A", "B", "C", "D"} {
+		e.Set(k, k)
+	}
+	if !e.Unset("B") {
+		t.Fatal("Unset B should return true")
+	}
+	got := make([]string, len(e.Vars))
+	for i, v := range e.Vars {
+		got[i] = v.Key
+	}
+	if want := []string{"A", "C", "D"}; !slices.Equal(got, want) {
+		t.Errorf("order after Unset: got %v, want %v", got, want)
+	}
+	// The lazily-rebuilt index must still resolve correctly after the delete.
+	if v, ok := e.Get("D"); !ok || v != "D" {
+		t.Errorf("Get(D) after Unset: got %q ok=%v", v, ok)
+	}
+}
+
+func TestDedupeKeys(t *testing.T) {
+	in := []Var{{Key: "A", Value: "1"}, {Key: "B", Value: "2"}, {Key: "A", Value: "3"}}
+	out := DedupeKeys(in)
+	if len(out) != 2 {
+		t.Fatalf("expected 2 vars, got %d: %+v", len(out), out)
+	}
+	// First-appearance position, last value wins.
+	if out[0].Key != "A" || out[0].Value != "3" {
+		t.Errorf("A should be at index 0 with last value 3, got %+v", out[0])
+	}
+	if out[1].Key != "B" || out[1].Value != "2" {
+		t.Errorf("B should be at index 1 with value 2, got %+v", out[1])
+	}
+}
+
+func TestValidateVars(t *testing.T) {
+	good := []Var{{Key: "DB_HOST", Value: "x"}, {Key: "_K2", Value: "y"}}
+	if err := ValidateVars(good); err != nil {
+		t.Errorf("ValidateVars(good) = %v, want nil", err)
+	}
+
+	badKey := []Var{{Key: "OK", Value: "x"}, {Key: "BAD-KEY", Value: "y"}}
+	err := ValidateVars(badKey)
+	if err == nil {
+		t.Fatal("ValidateVars(badKey) = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "BAD-KEY") {
+		t.Errorf("error should name the offending key, got %v", err)
+	}
+
+	// Over-length key and value are rejected.
+	if ValidKey(strings.Repeat("K", MaxKeyLen+1)) {
+		t.Error("ValidKey should reject a key longer than MaxKeyLen")
+	}
+	bigVal := []Var{{Key: "BIG", Value: strings.Repeat("v", MaxValueLen+1)}}
+	if err := ValidateVars(bigVal); err == nil {
+		t.Error("ValidateVars should reject a value larger than MaxValueLen")
+	}
+}
 
 func TestValidKey(t *testing.T) {
 	valid := []string{"KEY", "KEY1", "_KEY", "a", "API_KEY_2", "lower_case"}

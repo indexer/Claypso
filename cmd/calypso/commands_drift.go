@@ -55,7 +55,9 @@ CI guards ("alert me if .env was edited outside calypso").
 				if err != nil {
 					return fmt.Errorf("%s: %w", r, err)
 				}
-				printDrift(rep, details, reveal)
+				if err := printDrift(rep, details, reveal); err != nil {
+					return err
+				}
 				if rep.HasDrift() {
 					anyDrift = true
 				}
@@ -89,7 +91,7 @@ func pickRefs(v *vault.Vault, args []string) []string {
 	return out
 }
 
-func printDrift(r analysis.DriftReport, details, reveal bool) {
+func printDrift(r analysis.DriftReport, details, reveal bool) error {
 	fmt.Printf("%s  (%s)\n", r.Ref, r.Path)
 	if r.Missing {
 		fmt.Println("  .env file missing on disk — every vault key counts as removed.")
@@ -100,7 +102,7 @@ func printDrift(r analysis.DriftReport, details, reveal bool) {
 	}
 	if !details {
 		fmt.Println()
-		return
+		return nil
 	}
 	w := newTabWriter()
 	fmt.Fprintln(w, "  KEY\tVAULT\tDISK\tKIND")
@@ -114,6 +116,9 @@ func printDrift(r analysis.DriftReport, details, reveal bool) {
 			maybeMask(e.DiskVal, reveal, true),
 			e.Kind)
 	}
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		return err
+	}
 	fmt.Fprintln(os.Stdout)
+	return nil
 }

@@ -134,7 +134,7 @@ func verifyEnv(projectName, mapKey string, e *project.Environment) []Finding {
 	} else if !filepath.IsAbs(e.Path) {
 		out = append(out, Finding{
 			Severity: "warning", Where: where,
-			Message: fmt.Sprintf("Path %q is relative", e.Path), Fixable: true,
+			Message: fmt.Sprintf("Path %q is relative; re-run `add`/`env add` with an absolute --path (a relative path resolves against the current directory at pull/push time)", e.Path),
 		})
 	}
 	if e.UpdatedAt == "" {
@@ -149,7 +149,7 @@ func verifyEnv(projectName, mapKey string, e *project.Environment) []Finding {
 		}
 		if seen[kv.Key] {
 			out = append(out, Finding{
-				Severity: "error", Where: where,
+				Severity: "error", Where: where, Fixable: true,
 				Message: fmt.Sprintf("duplicate Var key %q", kv.Key),
 			})
 		}
@@ -203,17 +203,20 @@ func Repair(v *Vault) []string {
 				e.Name = en
 				applied = append(applied, fmt.Sprintf("%s@%s: set env Name (was %q)", name, en, old))
 			}
-			if e.Path != "" && !filepath.IsAbs(e.Path) {
-				abs, err := filepath.Abs(e.Path)
-				if err == nil {
-					old := e.Path
-					e.Path = abs
-					applied = append(applied, fmt.Sprintf("%s@%s: normalised Path (was %q)", name, en, old))
-				}
-			}
+			// Deliberately NOT normalising a relative Path here: filepath.Abs
+			// would resolve it against verify's current working directory, which
+			// is almost never the directory it was meant to be relative to. We
+			// can't know the intended base, so we surface it (verifyEnv) for the
+			// user to re-add with an absolute --path rather than bake in a guess.
 			if e.UpdatedAt == "" {
 				e.UpdatedAt = stamp
 				applied = append(applied, fmt.Sprintf("%s@%s: set env UpdatedAt", name, en))
+			}
+			if deduped := project.DedupeKeys(e.Vars); len(deduped) != len(e.Vars) {
+				removed := len(e.Vars) - len(deduped)
+				e.Vars = deduped
+				e.InvalidateIndex()
+				applied = append(applied, fmt.Sprintf("%s@%s: removed %d duplicate key(s)", name, en, removed))
 			}
 		}
 	}

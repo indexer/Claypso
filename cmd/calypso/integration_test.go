@@ -28,11 +28,28 @@ func calypsoPath(t *testing.T) string {
 }
 
 // runCalypso runs the binary with the given args, piping the passphrase via
-// the ENVHUB_PASSPHRASE env var. Returns stdout, stderr, and the run error.
+// the canonical CALYPSO_PASSPHRASE env var. Returns stdout, stderr, and the
+// run error.
 func runCalypso(t *testing.T, bin string, passphrase string, args ...string) (string, string, error) {
 	t.Helper()
+	return runCalypsoEnv(t, bin, []string{"CALYPSO_PASSPHRASE=" + passphrase}, args...)
+}
+
+// runCalypsoEnv runs the binary with explicit extra env entries. Any passphrase
+// var inherited from the test runner is stripped first, so the caller has full
+// control over which passphrase var (if any) the binary sees — keeping these
+// tests hermetic and letting us exercise env-var precedence.
+func runCalypsoEnv(t *testing.T, bin string, extraEnv []string, args ...string) (string, string, error) {
+	t.Helper()
+	base := make([]string, 0, len(os.Environ()))
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "CALYPSO_PASSPHRASE=") || strings.HasPrefix(kv, "ENVHUB_PASSPHRASE=") {
+			continue
+		}
+		base = append(base, kv)
+	}
 	cmd := exec.Command(bin, args...)
-	cmd.Env = append(os.Environ(), "ENVHUB_PASSPHRASE="+passphrase)
+	cmd.Env = append(base, extraEnv...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -147,5 +164,47 @@ func TestIntegration_Completion(t *testing.T) {
 		if len(stdout) < 20 {
 			t.Errorf("completion %s: output too short (%d bytes)", shell, len(stdout))
 		}
+	}
+}
+
+// TestIntegration_PassphraseEnvVars exercises the canonical vs. legacy
+// passphrase env vars: the canonical CALYPSO_PASSPHRASE works without a
+// warning, the legacy ENVHUB_PASSPHRASE still works but warns, and the
+// canonical var wins when both are set.
+func TestIntegration_PassphraseEnvVars(t *testing.T) {
+	bin := calypsoPath(t)
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.enc")
+	const pw = "passphrase-precedence"
+
+	if _, stderr, err := runCalypsoEnv(t, bin,
+		[]string{"CALYPSO_PASSPHRASE=" + pw}, "--vault", vaultPath, "init"); err != nil {
+		t.Fatalf("init: %v\nstderr: %s", err, stderr)
+	}
+
+	// Canonical var: works, no deprecation warning.
+	if _, stderr, err := runCalypsoEnv(t, bin,
+		[]string{"CALYPSO_PASSPHRASE=" + pw}, "--vault", vaultPath, "list"); err != nil {
+		t.Fatalf("list with CALYPSO_PASSPHRASE: %v\nstderr: %s", err, stderr)
+	} else if strings.Contains(stderr, "deprecated") {
+		t.Errorf("canonical var should not warn; stderr: %s", stderr)
+	}
+
+	// Legacy var: still works, but warns.
+	if _, stderr, err := runCalypsoEnv(t, bin,
+		[]string{"ENVHUB_PASSPHRASE=" + pw}, "--vault", vaultPath, "list"); err != nil {
+		t.Fatalf("list with ENVHUB_PASSPHRASE: %v\nstderr: %s", err, stderr)
+	} else if !strings.Contains(stderr, "deprecated") {
+		t.Errorf("legacy var should emit a deprecation warning; stderr: %s", stderr)
+	}
+
+	// Both set: canonical wins. ENVHUB holds a wrong value, so a successful run
+	// proves CALYPSO_PASSPHRASE took precedence (otherwise decrypt would fail).
+	if _, stderr, err := runCalypsoEnv(t, bin,
+		[]string{"CALYPSO_PASSPHRASE=" + pw, "ENVHUB_PASSPHRASE=wrong-passphrase"},
+		"--vault", vaultPath, "list"); err != nil {
+		t.Fatalf("canonical should win over legacy: %v\nstderr: %s", err, stderr)
+	} else if strings.Contains(stderr, "deprecated") {
+		t.Errorf("no deprecation warning expected when canonical is used; stderr: %s", stderr)
 	}
 }

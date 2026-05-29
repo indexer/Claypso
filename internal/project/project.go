@@ -16,6 +16,14 @@ const SafePlaceholder = "****"
 // vars into an Environment under this name.
 const DefaultEnvName = "default"
 
+// MaxKeyLen and MaxValueLen bound variable sizes so a pathological or hostile
+// .env can't blow up memory when pushed and re-encrypted. Generous on purpose:
+// real keys are short, and even a full PEM/cert bundle is well under 1 MiB.
+const (
+	MaxKeyLen   = 256
+	MaxValueLen = 1 << 20 // 1 MiB
+)
+
 // Var is a single environment variable.
 type Var struct {
 	Key   string `json:"key"`
@@ -26,7 +34,7 @@ type Var struct {
 // followed by letters, digits, or underscores. Enforcing this keeps generated
 // .env files parseable and the keys safe to reference from a shell.
 func ValidKey(s string) bool {
-	if s == "" {
+	if s == "" || len(s) > MaxKeyLen {
 		return false
 	}
 	for i := 0; i < len(s); i++ {
@@ -41,6 +49,40 @@ func ValidKey(s string) bool {
 		}
 	}
 	return true
+}
+
+// ValidateVars checks every var's key (ValidKey) and value length (MaxValueLen).
+// Ingest paths that accept externally-authored vars (e.g. `push` parsing a
+// hand-edited .env) call this so the vault never stores names `set` would
+// reject or unbounded values, keeping every way into the vault consistent.
+func ValidateVars(vars []Var) error {
+	for _, v := range vars {
+		if !ValidKey(v.Key) {
+			return fmt.Errorf("invalid variable name %q: must be a letter or '_' followed by letters, digits, or '_' (max %d chars)", v.Key, MaxKeyLen)
+		}
+		if len(v.Value) > MaxValueLen {
+			return fmt.Errorf("value for %q is too large: %d bytes (max %d)", v.Key, len(v.Value), MaxValueLen)
+		}
+	}
+	return nil
+}
+
+// DedupeKeys collapses repeated keys to a single entry — last value wins, each
+// key kept at the position of its first appearance. Ingest paths that accept
+// externally-authored vars (e.g. `push` parsing a .env that lists a key twice)
+// use this so the vault never stores duplicate keys.
+func DedupeKeys(vars []Var) []Var {
+	idx := make(map[string]int, len(vars))
+	out := make([]Var, 0, len(vars))
+	for _, v := range vars {
+		if i, ok := idx[v.Key]; ok {
+			out[i].Value = v.Value
+			continue
+		}
+		idx[v.Key] = len(out)
+		out = append(out, v)
+	}
+	return out
 }
 
 // Environment is one named variant of a project (dev / staging / prod /
@@ -91,20 +133,17 @@ func (e *Environment) Set(key, value string) {
 	e.Vars = append(e.Vars, Var{Key: key, Value: value})
 }
 
-// Unset removes a key. Returns true if it existed.
+// Unset removes a key, preserving the insertion order of the remaining vars
+// (matching Set's order-preserving contract). Returns true if it existed.
 func (e *Environment) Unset(key string) bool {
 	e.buildIndex()
 	i, ok := e.keyIndex[key]
 	if !ok {
 		return false
 	}
-	n := len(e.Vars) - 1
-	delete(e.keyIndex, key)
-	if i < n {
-		e.Vars[i] = e.Vars[n]
-		e.keyIndex[e.Vars[i].Key] = i
-	}
-	e.Vars = e.Vars[:n]
+	e.Vars = slices.Delete(e.Vars, i, i+1)
+	// Every index after i shifted down by one; rebuild the map lazily.
+	e.InvalidateIndex()
 	return true
 }
 

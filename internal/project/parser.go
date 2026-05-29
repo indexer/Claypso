@@ -13,9 +13,17 @@ import (
 //   - multiline quoted values
 //   - escape sequences (\n, \t, \\, \", \') inside double-quoted values
 func ParseEnv(content string) []Var {
+	// Strip a leading UTF-8 BOM so an editor that prepends one doesn't fold it
+	// into the first key — U+FEFF is not whitespace, so TrimSpace won't drop it.
+	content = strings.TrimPrefix(content, "\ufeff")
+
 	p := envParser{}
 	sc := bufio.NewScanner(strings.NewReader(content))
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	// content is already fully in memory, so cap the scanner's max token at the
+	// whole input: a single line can never exceed it, which removes the silent
+	// truncation the default 64KB cap would cause. ParseEnv returns no error,
+	// so a dropped bufio.ErrTooLong would otherwise be invisible.
+	sc.Buffer(make([]byte, 0, 64*1024), len(content)+1)
 	for sc.Scan() {
 		p.feed(sc.Text())
 	}
@@ -193,5 +201,12 @@ func needsQuoting(s string) bool {
 	if strings.ContainsAny(s, " #\"'\t") {
 		return true
 	}
-	return strings.ContainsRune(s, '\n')
+	if strings.ContainsRune(s, '\n') {
+		return true
+	}
+	// A value with leading or trailing whitespace that the parser's
+	// Unicode-aware TrimSpace would strip (e.g. NBSP U+00A0, ideographic
+	// space U+3000) must be quoted to survive a write→read roundtrip.
+	// ASCII space/tab boundaries are already caught above.
+	return strings.TrimSpace(s) != s
 }

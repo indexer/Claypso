@@ -136,7 +136,7 @@ func TestDeriveKeyDeterministic(t *testing.T) {
 	k1 := DeriveKey(pass, salt)
 	k2 := DeriveKey(pass, salt)
 
-	if k1 != k2 {
+	if !bytes.Equal(k1, k2) {
 		t.Error("DeriveKey should be deterministic for same inputs")
 	}
 }
@@ -213,7 +213,23 @@ func TestDeriveKeyDifferentSalt(t *testing.T) {
 	k1 := DeriveKey(pass, salt1)
 	k2 := DeriveKey(pass, salt2)
 
-	if k1 == k2 {
+	if bytes.Equal(k1, k2) {
 		t.Error("different salts should produce different keys")
+	}
+}
+
+func TestCipherClearZeroesKey(t *testing.T) {
+	c, err := NewCipher([]byte("passphrase for clear test"))
+	if err != nil {
+		t.Fatalf("NewCipher: %v", err)
+	}
+	if _, err := c.Seal([]byte("payload")); err != nil {
+		t.Fatalf("Seal before Clear: %v", err)
+	}
+	c.Clear()
+	for i, b := range c.key {
+		if b != 0 {
+			t.Fatalf("Clear should zero the derived key; byte %d = %d", i, b)
+		}
 	}
 }

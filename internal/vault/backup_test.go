@@ -90,6 +90,22 @@ func TestAutoBackup_RetentionZeroDisables(t *testing.T) {
 	}
 }
 
+// TestRestoreBackupRejectsTraversal confirms RestoreBackup only accepts a bare
+// filename that is actually one of our backups — never a path that escapes the
+// backup directory.
+func TestRestoreBackupRejectsTraversal(t *testing.T) {
+	path := vaultFile(t)
+	pw := []byte("pw")
+	if _, err := Init(bg, path, pw); err != nil { // creates one backup
+		t.Fatalf("Init: %v", err)
+	}
+	for _, bad := range []string{"../../etc/passwd", "..", "sub/x.enc", "/abs/x.enc", "not-a-backup.enc"} {
+		if err := RestoreBackup(bg, path, bad); err == nil {
+			t.Errorf("RestoreBackup(%q) = nil, want error", bad)
+		}
+	}
+}
+
 // TestRestoreBackup confirms that restoring a named backup overwrites the
 // vault file, snapshots the pre-restore state, and restores the exact
 // content that was in that backup.

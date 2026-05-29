@@ -4,7 +4,9 @@
 package vault
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"maps"
@@ -32,6 +34,15 @@ type Vault struct {
 	loadedVersion int            `json:"-"` // 0 for brand-new vaults; otherwise the version read from disk
 	lastBackupErr error          `json:"-"` // set by writeUnlocked when auto-backup fails (non-fatal)
 	cipher        *crypto.Cipher `json:"-"` // derived once on Load/Init, reused by writeUnlocked to skip a second Argon2id
+	fingerprint   []byte         `json:"-"` // sha256 of the on-disk blob at load; nil for never-persisted vaults. Used for compare-and-swap on save.
+}
+
+// Close zeroes the cached derived key. Call it when the vault is no longer
+// needed — most useful for a long-lived read-only holder like the dashboard,
+// which decrypts once and never re-encrypts. CLI commands exit shortly after
+// their final save, so the OS reclaims the memory regardless.
+func (v *Vault) Close() {
+	v.cipher.Clear()
 }
 
 // LastBackupErr returns the most recent auto-backup error, or nil. The save
@@ -47,7 +58,34 @@ var (
 	ErrDuplicate   = errors.New("project already registered")
 	ErrEnvRequired = errors.New("project has multiple environments; specify with name@env")
 	ErrBadEnvName  = errors.New("invalid environment name")
+	ErrConflict    = errors.New("vault changed on disk since it was read; re-run the command")
 )
+
+// blobFingerprint returns a content hash of an on-disk vault blob, used to
+// detect whether the file changed between a Load and the matching Save.
+func blobFingerprint(blob []byte) []byte {
+	sum := sha256.Sum256(blob)
+	return sum[:]
+}
+
+// checkNoConflict returns ErrConflict if the on-disk vault differs from what
+// this Vault was loaded from — i.e. another process wrote it in the gap
+// between our Load and this Save. The caller must hold the advisory lock so
+// this read-and-compare is atomic with the write that follows. A nil
+// fingerprint (a never-persisted vault, e.g. fresh Init) skips the check.
+func (v *Vault) checkNoConflict(path string) error {
+	if v.fingerprint == nil {
+		return nil
+	}
+	cur, err := os.ReadFile(path)
+	if err != nil {
+		return nil // nothing on disk to clobber (or unreadable) — let the write proceed
+	}
+	if !bytes.Equal(blobFingerprint(cur), v.fingerprint) {
+		return ErrConflict
+	}
+	return nil
+}
 
 // DefaultPath returns ~/.calypso/vault.enc
 func DefaultPath() (string, error) {
@@ -73,7 +111,11 @@ func atomicWrite(path string, blob []byte) error {
 	if err := os.WriteFile(tmp, blob, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp) // don't leave a stale temp behind on failure
+		return err
+	}
+	return nil
 }
 
 // withLock acquires the advisory lock on the vault and runs fn while it is held.
@@ -147,12 +189,18 @@ func Load(ctx context.Context, path string, passphrase []byte) (*Vault, error) {
 			return err
 		}
 		loaded, err := unmarshalAndMigrate(plain)
+		// The decrypted JSON holds every secret; zero it now that values have
+		// been copied into the Vault struct (the largest single plaintext copy).
+		crypto.Wipe(plain)
 		if err != nil {
 			return err
 		}
 		// Reuse the salt+key from this decryption when the vault is saved
 		// again in this process, so a load+save cycle derives the key once.
 		loaded.cipher = cipher
+		// Remember what was on disk so Save can detect a concurrent write
+		// (compare-and-swap) instead of silently clobbering it.
+		loaded.fingerprint = blobFingerprint(blob)
 		v = loaded
 		return nil
 	})

@@ -24,8 +24,10 @@ duplicate keys, name/key mismatches, etc.
 
 By default it's read-only — exit code reflects whether any errors were
 found. Pass --fix to apply trivial repairs (timestamps, name sync,
-relative-path normalisation) and save the result. Auto-backup preserves
-the pre-fix vault.`,
+duplicate-key removal) and save the result. Auto-backup preserves the
+pre-fix vault. Relative paths are reported but not auto-fixed: calypso
+can't know what they were meant to be relative to, so re-add with an
+absolute --path.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			v, pw, err := openVault(ctx)

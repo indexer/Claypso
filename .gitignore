@@ -1,6 +1,7 @@
 /calypso
 /calypso.exe
 *.enc
+*.bak
 *.tmp
 *.lock
 .env

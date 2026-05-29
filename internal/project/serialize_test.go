@@ -52,6 +52,45 @@ func TestSerializeEnvNeedsQuoting(t *testing.T) {
 	}
 }
 
+func TestSerializeEnvUnicodeRoundtrip(t *testing.T) {
+	// Every value must survive SerializeEnv → ParseEnv unchanged. The
+	// boundary-whitespace cases are regression guards: ParseEnv trims with the
+	// Unicode-aware strings.TrimSpace, so values whose first/last rune is
+	// non-ASCII whitespace (NBSP U+00A0, ideographic space U+3000) used to be
+	// silently stripped because needsQuoting only checked ASCII whitespace.
+	cases := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{"cjk", "CJK", "日本語パスワード"},
+		{"rtl_arabic", "RTL", "مرحبا-كلمة"},
+		{"accents", "ACCENT", "café-naïve-Köln"},
+		{"interior_emoji", "EMOJI", "pass🔑word"},
+		{"emoji_zwj_sequence", "FAMILY", "👨‍👩‍👧‍👦"},
+		{"emoji_only", "PARTY", "🎉"},
+		{"interior_nbsp", "INNER_NBSP", "a\u00A0b"},
+		{"leading_nbsp", "LEAD_NBSP", "\u00A0secret"},
+		{"trailing_ideographic_space", "TRAIL_IDEO", "secret\u3000"},
+		{"wrapping_nbsp", "WRAP_NBSP", "\u00A0value\u00A0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := SerializeEnv([]Var{{Key: tc.key, Value: tc.value}})
+			parsed := ParseEnv(out)
+			if len(parsed) != 1 {
+				t.Fatalf("expected 1 var, got %d (serialized: %q)", len(parsed), out)
+			}
+			if parsed[0].Key != tc.key {
+				t.Errorf("key: expected %q, got %q", tc.key, parsed[0].Key)
+			}
+			if parsed[0].Value != tc.value {
+				t.Errorf("value roundtrip mismatch: expected %q, got %q (serialized: %q)", tc.value, parsed[0].Value, out)
+			}
+		})
+	}
+}
+
 func TestReadWriteEnvFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".env")
@@ -102,6 +141,21 @@ func TestWriteEnvFilePerms(t *testing.T) {
 	perm := info.Mode().Perm()
 	if perm != 0o600 {
 		t.Errorf("expected 0600 perms, got %#o", perm)
+	}
+}
+
+func TestWriteEnvFileAtomicNoTemp(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+	if err := WriteEnvFile(path, []Var{{Key: "A", Value: "1"}}); err != nil {
+		t.Fatalf("WriteEnvFile: %v", err)
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("temp file should not remain after an atomic write (stat err=%v)", err)
+	}
+	read, err := ReadEnvFile(path)
+	if err != nil || len(read) != 1 || read[0].Value != "1" {
+		t.Errorf("content after atomic write wrong: %+v (err=%v)", read, err)
 	}
 }
 

@@ -27,12 +27,19 @@ const (
 // The two are deliberately indistinguishable.
 var ErrDecrypt = errors.New("decryption failed: wrong passphrase or corrupted vault")
 
-// DeriveKey turns a passphrase + salt into a 32-byte symmetric key.
-func DeriveKey(passphrase, salt []byte) [keyLen]byte {
-	raw := argon2.IDKey(passphrase, salt, argonTime, argonMemory, argonThreads, keyLen)
-	var key [keyLen]byte
-	copy(key[:], raw)
-	return key
+// Wipe zeroes b. Use it on key material or decrypted plaintext once it is no
+// longer needed so secrets don't linger in memory longer than necessary.
+func Wipe(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+}
+
+// DeriveKey turns a passphrase + salt into a 32-byte symmetric key. The result
+// is a freshly allocated, addressable slice so callers can Wipe it; we don't
+// copy it into a [32]byte (whose value-copies would be unzeroable).
+func DeriveKey(passphrase, salt []byte) []byte {
+	return argon2.IDKey(passphrase, salt, argonTime, argonMemory, argonThreads, keyLen)
 }
 
 // Encrypt produces a self-describing blob: salt || nonce || ciphertext.
@@ -61,8 +68,25 @@ func Decrypt(passphrase, blob []byte) ([]byte, error) {
 // fresh random nonce on every call. This is what lets a single CLI invocation
 // decrypt the vault and later re-encrypt it without a second key derivation.
 type Cipher struct {
-	key  [keyLen]byte
+	key  []byte // keyLen bytes; zero with Clear() when no longer needed
 	salt []byte // saltLen bytes, owned by this Cipher
+}
+
+// Clear zeroes the derived key. Call it when the Cipher is no longer needed —
+// e.g. a long-lived read-only holder like the dashboard that decrypts once and
+// never re-encrypts. After Clear the Cipher must not be used to Seal again.
+func (c *Cipher) Clear() {
+	if c != nil {
+		Wipe(c.key)
+	}
+}
+
+// sealKey copies the (slice) key into a fixed-size array for secretbox, which
+// requires a *[32]byte. The caller must Wipe the returned array when done.
+func (c *Cipher) sealKey() [keyLen]byte {
+	var k [keyLen]byte
+	copy(k[:], c.key)
+	return k
 }
 
 // NewCipher derives a key from passphrase using a fresh random salt. Use it
@@ -91,7 +115,9 @@ func Open(passphrase, blob []byte) ([]byte, *Cipher, error) {
 
 	c := &Cipher{key: DeriveKey(passphrase, salt), salt: salt}
 
-	plaintext, ok := secretbox.Open(nil, ciphertext, &nonce, &c.key)
+	k := c.sealKey()
+	defer Wipe(k[:])
+	plaintext, ok := secretbox.Open(nil, ciphertext, &nonce, &k)
 	if !ok {
 		return nil, nil, ErrDecrypt
 	}
@@ -108,9 +134,11 @@ func (c *Cipher) Seal(plaintext []byte) ([]byte, error) {
 		return nil, fmt.Errorf("generating nonce: %w", err)
 	}
 
+	k := c.sealKey()
+	defer Wipe(k[:])
 	out := make([]byte, 0, saltLen+nonceLen+len(plaintext)+secretbox.Overhead)
 	out = append(out, c.salt...)
 	out = append(out, nonce[:]...)
-	out = secretbox.Seal(out, plaintext, &nonce, &c.key)
+	out = secretbox.Seal(out, plaintext, &nonce, &k)
 	return out, nil
 }

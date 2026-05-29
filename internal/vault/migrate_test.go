@@ -4,11 +4,25 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/yemon/calypso/internal/crypto"
 	"github.com/yemon/calypso/internal/project"
 )
+
+// TestUnmarshalRejectsNewerVersion confirms a vault written by a future
+// calypso (schema version above what this build supports) is refused at load
+// with a clear message, rather than loaded and then failing on the next save.
+func TestUnmarshalRejectsNewerVersion(t *testing.T) {
+	_, err := unmarshalAndMigrate([]byte(`{"version":99,"projects":{}}`))
+	if err == nil {
+		t.Fatal("expected an error loading a newer-than-supported vault version")
+	}
+	if !strings.Contains(err.Error(), "newer") {
+		t.Errorf("error should explain the version is too new, got: %v", err)
+	}
+}
 
 // TestMigrateV1 writes a v1-shaped vault to disk, then loads it via the
 // normal Load path and asserts each old project ends up with a single

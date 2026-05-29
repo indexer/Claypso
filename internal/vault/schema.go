@@ -70,13 +70,22 @@ func (v *Vault) writeUnlocked(ctx context.Context, path string, passphrase []byt
 		v.cipher = c
 	}
 	blob, err := v.cipher.Seal(plain)
+	crypto.Wipe(plain) // zero the plaintext now that it is encrypted
 	if err != nil {
+		return err
+	}
+	// Compare-and-swap: refuse to overwrite a vault that changed on disk since
+	// we loaded it (a concurrent writer in the load-modify-save gap), rather
+	// than silently losing its update. The lock is held, so check+write is
+	// atomic against other calypso processes.
+	if err := v.checkNoConflict(path); err != nil {
 		return err
 	}
 	if err := atomicWrite(path, blob); err != nil {
 		return err
 	}
 	v.loadedVersion = target
+	v.fingerprint = blobFingerprint(blob) // remember what we just wrote for any later save
 
 	// Auto-backup is best-effort: failure here doesn't undo the save (the
 	// primary vault file is intact). We surface the error so the CLI can
@@ -134,6 +143,13 @@ func unmarshalAndMigrate(plain []byte) (*Vault, error) {
 	}
 	if err := json.Unmarshal(plain, &head); err != nil {
 		return nil, fmt.Errorf("vault decrypted but is unreadable: %w", err)
+	}
+
+	// Reject a vault written by a newer calypso up front: we could load it but
+	// not save it back in its own format, so silently accepting it would turn
+	// the next mutation into a confusing failure. Fail loudly with a fix.
+	if head.Version > schemaVersion {
+		return nil, fmt.Errorf("vault is schema v%d, newer than this calypso build supports (v%d); upgrade calypso to use it", head.Version, schemaVersion)
 	}
 
 	if head.Version < 2 {

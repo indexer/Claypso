@@ -116,7 +116,7 @@ func readImportBlob(path string, isBase64 bool) ([]byte, error) {
 // blob over the current vault file. No passphrase is needed here; the next
 // command that opens the vault will validate it.
 func fullVaultImport(blob []byte) error {
-	if err := os.WriteFile(vaultPath, blob, 0o600); err != nil {
+	if err := vault.ImportRawBlob(vaultPath, blob); err != nil {
 		return fmt.Errorf("writing imported vault: %w", err)
 	}
 	fmt.Printf("Imported full vault to %s (%d bytes)\n", vaultPath, len(blob))

@@ -75,25 +75,29 @@ func gapsCmd() *cobra.Command {
 			}
 			if len(cross) > 0 {
 				fmt.Println("Cross-project gaps (same env name across projects):")
-				printGaps(cross)
+				if err := printGaps(cross); err != nil {
+					return err
+				}
 				fmt.Println()
 			}
 			if len(intra) > 0 {
 				fmt.Println("Intra-project gaps (across envs of the same project):")
-				printGaps(intra)
+				if err := printGaps(intra); err != nil {
+					return err
+				}
 			}
 			return nil
 		},
 	}
 }
 
-func printGaps(gaps []analysis.Gap) {
+func printGaps(gaps []analysis.Gap) error {
 	w := newTabWriter()
 	fmt.Fprintln(w, "MISSING IN\tKEY\tDEFINED IN")
 	for _, g := range gaps {
 		fmt.Fprintf(w, "%s\t%s\t%s\n", g.Ref, g.Key, joinRefs(g.DefinedIn))
 	}
-	w.Flush()
+	return w.Flush()
 }
 
 func joinRefs(refs []analysis.EnvRef) string {
@@ -118,6 +122,7 @@ func dashboardCmd() *cobra.Command {
 				return err
 			}
 			clearBytes(pw)
+			v.Close() // read-only server: drop the derived key it will never use again
 			return dashboard.Serve(v, port)
 		},
 	}

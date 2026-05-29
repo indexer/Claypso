@@ -4,14 +4,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 )
-
-// onUnix reports whether the active build provides real advisory locking
-// (flock(2)). The windows build is a no-op open with no contention semantics.
-func onUnix() bool { return runtime.GOOS != "windows" }
 
 // TestLockAcquireAndUnlock verifies the basic happy path: acquiring a lock on
 // a fresh path succeeds, returns a usable file handle, and unlocking it
@@ -37,21 +32,12 @@ func TestLockAcquireAndUnlock(t *testing.T) {
 }
 
 // TestLockCreatesParentDirs verifies that Lock creates any missing parent
-// directories for the lock path (documented behaviour on the unix build).
-// On windows the parent directory does not exist, so we create it first to
-// keep the test hermetic and exercise only the documented API.
+// directories for the lock path. Both the unix and windows builds MkdirAll
+// before opening the lock file.
 func TestLockCreatesParentDirs(t *testing.T) {
 	base := t.TempDir()
 	nested := filepath.Join(base, "a", "b", "c")
 	path := filepath.Join(nested, "calypso.lock")
-
-	if !onUnix() {
-		// The windows implementation does not MkdirAll; create the tree so
-		// OpenFile can succeed and we still test the public contract.
-		if err := os.MkdirAll(nested, 0o700); err != nil {
-			t.Fatalf("setup MkdirAll: %v", err)
-		}
-	}
 
 	f, err := Lock(path)
 	if err != nil {
@@ -64,10 +50,11 @@ func TestLockCreatesParentDirs(t *testing.T) {
 	}
 }
 
-// TestSecondAcquireContention verifies the documented contention behaviour.
-// On the unix build flock uses LOCK_EX|LOCK_NB, so a second acquire on a held
-// lock must fail immediately (non-blocking) rather than block. On the windows
-// build there is no real locking, so a second acquire succeeds.
+// TestSecondAcquireContention verifies the documented contention behaviour:
+// a second acquire on a held lock must fail immediately rather than block.
+// The unix build uses flock(LOCK_EX|LOCK_NB); the windows build uses
+// LockFileEx(LOCKFILE_EXCLUSIVE_LOCK|LOCKFILE_FAIL_IMMEDIATELY). Both are
+// non-blocking and held by the file handle, so a second open contends.
 func TestSecondAcquireContention(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "calypso.lock")
 
@@ -92,19 +79,9 @@ func TestSecondAcquireContention(t *testing.T) {
 
 	select {
 	case res := <-done:
-		if onUnix() {
-			if res.err == nil {
-				_ = Unlock(res.f)
-				t.Fatal("expected second Lock to fail while first is held (LOCK_NB), got nil error")
-			}
-		} else {
-			// windows: no contention, second open should succeed.
-			if res.err != nil {
-				t.Fatalf("windows second Lock unexpectedly failed: %v", res.err)
-			}
-			if res.f != nil {
-				_ = Unlock(res.f)
-			}
+		if res.err == nil {
+			_ = Unlock(res.f)
+			t.Fatal("expected second Lock to fail while first is held (non-blocking), got nil error")
 		}
 	case <-time.After(5 * time.Second):
 		// Regression path: the goroutine is still blocked inside Lock. Do not

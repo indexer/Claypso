@@ -204,6 +204,16 @@ func pushCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("reading %s: %w", e.Path, err)
 			}
+			// The parser doesn't enforce key syntax or value size, so a
+			// hand-edited .env can carry names `set` would reject or huge values.
+			// Validate before ingesting so the vault never stores keys that
+			// won't round-trip back to a .env, or unbounded values.
+			if err := project.ValidateVars(vars); err != nil {
+				return fmt.Errorf("%s: %w", e.Path, err)
+			}
+			// A .env may list a key more than once; keep last-wins so the vault
+			// never stores duplicates.
+			vars = project.DedupeKeys(vars)
 
 			if !force && len(e.Vars) > 0 {
 				showPushDiff(p.Name, e, vars)

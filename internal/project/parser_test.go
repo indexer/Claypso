@@ -1,6 +1,41 @@
 package project
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestParseEnvStripsBOM(t *testing.T) {
+	// A UTF-8 BOM some editors prepend must not become part of the first key.
+	vars := ParseEnv("\ufeffDB_HOST=localhost\nDB_PORT=5432")
+	if len(vars) != 2 {
+		t.Fatalf("expected 2 vars, got %d: %+v", len(vars), vars)
+	}
+	if vars[0].Key != "DB_HOST" {
+		t.Errorf("first key should be DB_HOST without BOM, got %q", vars[0].Key)
+	}
+}
+
+func TestParseEnvLongLineNotTruncated(t *testing.T) {
+	// A value far larger than bufio.Scanner's default 64KB token cap (and the
+	// old 1MB cap) must parse in full, and content after it must not be
+	// silently dropped.
+	big := strings.Repeat("x", 2*1024*1024) // 2 MB
+	vars := ParseEnv("BIG=" + big + "\nAFTER=tail")
+	if len(vars) != 2 {
+		t.Fatalf("expected 2 vars; a long line must not drop the rest, got %d", len(vars))
+	}
+	got := map[string]string{}
+	for _, v := range vars {
+		got[v.Key] = v.Value
+	}
+	if len(got["BIG"]) != len(big) {
+		t.Errorf("BIG truncated: got %d bytes, want %d", len(got["BIG"]), len(big))
+	}
+	if got["AFTER"] != "tail" {
+		t.Errorf("content after a long line was dropped: AFTER=%q", got["AFTER"])
+	}
+}
 
 func TestParseEnvBasic(t *testing.T) {
 	content := `DB_HOST=localhost

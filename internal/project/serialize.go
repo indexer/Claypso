@@ -54,17 +54,35 @@ func ReadEnvFile(path string) ([]Var, error) {
 	return ParseEnv(string(data)), nil
 }
 
+// atomicWriteFile writes data to path durably: it writes a sibling temp file
+// and renames it into place, so a reader (or a crash mid-write) never sees a
+// half-written or truncated file. This mirrors the vault's own write contract
+// for the .env files calypso generates, which a plain os.WriteFile would
+// otherwise truncate in place.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, perm); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
 // WriteEnvFile writes variables to disk with owner-only permissions.
 func WriteEnvFile(path string, vars []Var) error {
-	return os.WriteFile(path, []byte(SerializeEnv(vars)), 0o600)
+	return atomicWriteFile(path, []byte(SerializeEnv(vars)), 0o600)
 }
 
 // WriteSafeEnvFile writes with values replaced by SafePlaceholder.
 func WriteSafeEnvFile(path string, vars []Var) error {
-	return os.WriteFile(path, []byte(SerializeSafeEnv(vars)), 0o600)
+	return atomicWriteFile(path, []byte(SerializeSafeEnv(vars)), 0o600)
 }
 
-// WriteExampleEnvFile writes a .env.example template with empty values.
+// WriteExampleEnvFile writes a .env.example template with empty values. The
+// template holds no secrets, so it is intentionally world-readable (0o644).
 func WriteExampleEnvFile(path string, vars []Var) error {
-	return os.WriteFile(path, []byte(SerializeExampleEnv(vars)), 0o644) //nolint:gosec // non-secret template, world-readable is intentional
+	return atomicWriteFile(path, []byte(SerializeExampleEnv(vars)), 0o644)
 }

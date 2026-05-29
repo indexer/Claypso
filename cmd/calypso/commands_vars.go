@@ -31,9 +31,13 @@ func setCmd() *cobra.Command {
 				}
 				key := strings.TrimSpace(kv[:eq])
 				if !project.ValidKey(key) {
-					return fmt.Errorf("invalid key %q: keys must start with a letter or _ and contain only letters, digits, or _", key)
+					return fmt.Errorf("invalid key %q: keys must start with a letter or _ and contain only letters, digits, or _ (max %d chars)", key, project.MaxKeyLen)
 				}
-				e.Set(key, kv[eq+1:])
+				val := kv[eq+1:]
+				if len(val) > project.MaxValueLen {
+					return fmt.Errorf("value for %q is too large: %d bytes (max %d)", key, len(val), project.MaxValueLen)
+				}
+				e.Set(key, val)
 			}
 			v.Touch(p.Name, e.Name)
 			if err := saveAndWarn(ctx, v, pw); err != nil {

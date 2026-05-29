@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 )
 
 // BackupNames returns the auto-backup filenames (oldest first) for a vault
@@ -25,6 +26,16 @@ func RestoreBackup(ctx context.Context, path, name string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// name must be one of our own backups, never an arbitrary path. Enforcing
+	// the documented "bare filename from BackupNames" contract via an allowlist
+	// keeps a crafted name like "../../etc/x" from escaping the backup dir.
+	known, err := BackupNames(path)
+	if err != nil {
+		return fmt.Errorf("list backups: %w", err)
+	}
+	if !slices.Contains(known, name) {
+		return fmt.Errorf("no such backup %q (run `calypso vault backups` to list)", name)
+	}
 	src := filepath.Join(backupDir(path), name)
 	if _, err := os.Stat(src); err != nil {
 		return fmt.Errorf("backup %q not found: %w", name, err)
@@ -44,6 +55,19 @@ func RestoreBackup(ctx context.Context, path, name string) error {
 				return fmt.Errorf("snapshot current vault: %w", err)
 			}
 		}
+		return atomicWrite(path, blob)
+	})
+}
+
+// ImportRawBlob blind-copies an opaque encrypted blob over the vault at path,
+// as a full-vault `import` does. It takes the vault lock and writes atomically
+// (temp file + rename) so a concurrent calypso process can't interleave with
+// the write and a crash mid-import can't leave a half-written vault — matching
+// the durability contract every other vault write already follows. The blob is
+// not validated here; the next command that opens the vault rejects it if the
+// passphrase or format is wrong.
+func ImportRawBlob(path string, blob []byte) error {
+	return withLock(path, func() error {
 		return atomicWrite(path, blob)
 	})
 }

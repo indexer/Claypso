@@ -18,6 +18,48 @@ func TestVerify_HealthyVaultHasNoFindings(t *testing.T) {
 	}
 }
 
+func TestRepair_DedupesDuplicateKeys(t *testing.T) {
+	v := New()
+	_, e, err := v.AddProject("alpha", "", "/tmp/alpha/.env")
+	if err != nil {
+		t.Fatalf("AddProject: %v", err)
+	}
+	e.Vars = []project.Var{
+		{Key: "DB", Value: "old"},
+		{Key: "API", Value: "x"},
+		{Key: "DB", Value: "new"},
+	}
+	e.InvalidateIndex()
+
+	// Verify flags the duplicate as a fixable error.
+	foundDup := false
+	for _, f := range Verify(v) {
+		if strings.Contains(f.Message, "duplicate Var key") {
+			foundDup = true
+			if !f.Fixable {
+				t.Error("duplicate-key finding should be Fixable")
+			}
+		}
+	}
+	if !foundDup {
+		t.Fatal("Verify did not flag the duplicate key")
+	}
+
+	// Repair collapses to one entry, last value winning.
+	Repair(v)
+	if len(e.Vars) != 2 {
+		t.Fatalf("expected 2 vars after repair, got %d: %+v", len(e.Vars), e.Vars)
+	}
+	if val, ok := e.Get("DB"); !ok || val != "new" {
+		t.Errorf("DB after dedupe should be 'new', got %q ok=%v", val, ok)
+	}
+	for _, f := range Verify(v) {
+		if strings.Contains(f.Message, "duplicate Var key") {
+			t.Errorf("duplicate finding still present after repair: %v", f)
+		}
+	}
+}
+
 func TestVerify_FlagsAllKnownIssues(t *testing.T) {
 	v := &Vault{} // nil Projects, empty CreatedAt
 	got := Verify(v)
