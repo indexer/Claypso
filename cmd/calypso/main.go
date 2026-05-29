@@ -49,6 +49,11 @@ your machine.`,
 }
 
 func main() {
+	// Best-effort: disable core dumps / ptrace before any secret is in memory,
+	// so a crash can't persist the vault's plaintext to disk.
+	if err := hardenProcess(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: process hardening failed: %v\n", err)
+	}
 	if err := rootCmd().Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
