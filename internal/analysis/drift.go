@@ -1,9 +1,10 @@
 package analysis
 
 import (
+	"cmp"
 	"errors"
 	"io/fs"
-	"sort"
+	"slices"
 
 	"github.com/yemon/calypso/internal/project"
 )
@@ -141,7 +142,7 @@ func driftCore(e *project.Environment, projectName string, withEntries bool) (Dr
 }
 
 func sortDriftEntries(es []DriftEntry) {
-	sort.Slice(es, func(i, j int) bool { return es[i].Key < es[j].Key })
+	slices.SortFunc(es, func(a, b DriftEntry) int { return cmp.Compare(a.Key, b.Key) })
 }
 
 // isNotExist matches the standard library's "file does not exist" error

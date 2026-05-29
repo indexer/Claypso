@@ -10,7 +10,6 @@ import (
 // an encrypted partial-export blob. The recipient imports with the same
 // `calypso import` command — it auto-detects partial vs full-vault input.
 func vaultExportProjectCmd() *cobra.Command {
-	var force bool
 	cmd := &cobra.Command{
 		Use:   "export-project <project[@env]> <path>",
 		Short: "Export one project (or one env) as an encrypted shareable blob",
@@ -41,6 +40,5 @@ targeted backup of just the env you care about.`,
 			return nil
 		},
 	}
-	_ = force
 	return cmd
 }

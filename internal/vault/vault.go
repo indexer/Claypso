@@ -7,9 +7,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/yemon/calypso/internal/crypto"
@@ -62,6 +63,18 @@ func lockPath(vaultPath string) string {
 }
 
 func nowStamp() string { return time.Now().UTC().Format(time.RFC3339) }
+
+// atomicWrite writes blob to path durably: it writes a sibling .tmp file with
+// owner-only permissions and renames it into place, so a reader never observes
+// a half-written vault. Every encrypted file the vault produces goes through
+// here, keeping the write-then-rename contract in one place.
+func atomicWrite(path string, blob []byte) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, blob, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
 
 // withLock acquires the advisory lock on the vault and runs fn while it is held.
 func withLock(vaultPath string, fn func() error) error {
@@ -156,12 +169,7 @@ func (v *Vault) Save(ctx context.Context, path string, passphrase []byte) error 
 
 // Names returns project names sorted alphabetically.
 func (v *Vault) Names() []string {
-	names := make([]string, 0, len(v.Projects))
-	for n := range v.Projects {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	return names
+	return slices.Sorted(maps.Keys(v.Projects))
 }
 
 // Project fetches a project by name.

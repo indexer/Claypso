@@ -133,11 +133,7 @@ func writePartial(dst string, passphrase []byte, env *partialEnvelope) error {
 	if err != nil {
 		return err
 	}
-	tmp := dst + ".tmp"
-	if err := os.WriteFile(tmp, blob, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, dst)
+	return atomicWrite(dst, blob)
 }
 
 // cloneProject does a deep enough copy that mutating the returned value

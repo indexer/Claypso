@@ -4,7 +4,9 @@
 package analysis
 
 import (
-	"sort"
+	"cmp"
+	"maps"
+	"slices"
 
 	"github.com/yemon/calypso/internal/project"
 )
@@ -56,15 +58,12 @@ func KeyMatrix(v VaultReader) []KeyUsage {
 	}
 	out := make([]KeyUsage, 0, len(seen))
 	for k, refs := range seen {
-		sort.Slice(refs, func(i, j int) bool {
-			if refs[i].Project != refs[j].Project {
-				return refs[i].Project < refs[j].Project
-			}
-			return refs[i].Env < refs[j].Env
+		slices.SortFunc(refs, func(a, b EnvRef) int {
+			return cmp.Or(cmp.Compare(a.Project, b.Project), cmp.Compare(a.Env, b.Env))
 		})
 		out = append(out, KeyUsage{Key: k, Refs: refs})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	slices.SortFunc(out, func(a, b KeyUsage) int { return cmp.Compare(a.Key, b.Key) })
 	return out
 }
 
@@ -98,11 +97,7 @@ func Diff(v VaultReader, specA, specB string) ([]DiffEntry, error) {
 	for _, kv := range b.Vars {
 		keys[kv.Key] = struct{}{}
 	}
-	sorted := make([]string, 0, len(keys))
-	for k := range keys {
-		sorted = append(sorted, k)
-	}
-	sort.Strings(sorted)
+	sorted := slices.Sorted(maps.Keys(keys))
 
 	out := make([]DiffEntry, 0, len(sorted))
 	for _, k := range sorted {

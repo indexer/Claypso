@@ -1,10 +1,11 @@
 package vault
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/yemon/calypso/internal/project"
@@ -68,14 +69,12 @@ func Verify(v *Vault) []Finding {
 		})
 	}
 
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Severity != out[j].Severity {
-			return out[i].Severity < out[j].Severity // "error" before "warning"
-		}
-		if out[i].Where != out[j].Where {
-			return out[i].Where < out[j].Where
-		}
-		return out[i].Message < out[j].Message
+	slices.SortStableFunc(out, func(a, b Finding) int {
+		return cmp.Or(
+			cmp.Compare(a.Severity, b.Severity), // "error" before "warning"
+			cmp.Compare(a.Where, b.Where),
+			cmp.Compare(a.Message, b.Message),
+		)
 	})
 	return out
 }

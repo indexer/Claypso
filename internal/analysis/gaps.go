@@ -1,6 +1,9 @@
 package analysis
 
-import "sort"
+import (
+	"cmp"
+	"slices"
+)
 
 // Gap is a missing-value finding.
 type Gap struct {
@@ -56,8 +59,8 @@ func FindCrossProjectGaps(v VaultReader) []Gap {
 			if mine[key] {
 				continue
 			}
-			sorted := append([]EnvRef(nil), havers...)
-			sort.Slice(sorted, func(i, j int) bool { return sorted[i].Project < sorted[j].Project })
+			sorted := slices.Clone(havers)
+			slices.SortFunc(sorted, func(a, b EnvRef) int { return cmp.Compare(a.Project, b.Project) })
 			gaps = append(gaps, Gap{Ref: ref, Key: key, DefinedIn: sorted})
 		}
 	}
@@ -101,8 +104,8 @@ func FindIntraProjectGaps(v VaultReader) []Gap {
 				if mine[key] {
 					continue
 				}
-				sorted := append([]EnvRef(nil), havers...)
-				sort.Slice(sorted, func(i, j int) bool { return sorted[i].Env < sorted[j].Env })
+				sorted := slices.Clone(havers)
+				slices.SortFunc(sorted, func(a, b EnvRef) int { return cmp.Compare(a.Env, b.Env) })
 				gaps = append(gaps, Gap{Ref: ref, Key: key, DefinedIn: sorted})
 			}
 		}
@@ -112,13 +115,11 @@ func FindIntraProjectGaps(v VaultReader) []Gap {
 }
 
 func sortGaps(gaps []Gap) {
-	sort.Slice(gaps, func(i, j int) bool {
-		if gaps[i].Ref.Project != gaps[j].Ref.Project {
-			return gaps[i].Ref.Project < gaps[j].Ref.Project
-		}
-		if gaps[i].Ref.Env != gaps[j].Ref.Env {
-			return gaps[i].Ref.Env < gaps[j].Ref.Env
-		}
-		return gaps[i].Key < gaps[j].Key
+	slices.SortFunc(gaps, func(a, b Gap) int {
+		return cmp.Or(
+			cmp.Compare(a.Ref.Project, b.Ref.Project),
+			cmp.Compare(a.Ref.Env, b.Ref.Env),
+			cmp.Compare(a.Key, b.Key),
+		)
 	})
 }

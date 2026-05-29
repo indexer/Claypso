@@ -2,8 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 	"github.com/yemon/calypso/internal/project"
@@ -38,7 +36,7 @@ func envListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+			w := newTabWriter()
 			fmt.Fprintln(w, "ENV\tVARS\tUPDATED\tPATH")
 			for _, en := range p.EnvNames() {
 				e := p.Envs[en]

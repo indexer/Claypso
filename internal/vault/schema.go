@@ -73,11 +73,7 @@ func (v *Vault) writeUnlocked(ctx context.Context, path string, passphrase []byt
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, blob, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := atomicWrite(path, blob); err != nil {
 		return err
 	}
 	v.loadedVersion = target

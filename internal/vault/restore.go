@@ -44,10 +44,6 @@ func RestoreBackup(ctx context.Context, path, name string) error {
 				return fmt.Errorf("snapshot current vault: %w", err)
 			}
 		}
-		tmp := path + ".tmp"
-		if err := os.WriteFile(tmp, blob, 0o600); err != nil {
-			return err
-		}
-		return os.Rename(tmp, path)
+		return atomicWrite(path, blob)
 	})
 }

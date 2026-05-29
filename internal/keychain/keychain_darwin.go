@@ -3,6 +3,7 @@
 package keychain
 
 import (
+	"bytes"
 	"os/exec"
 )
 
@@ -26,7 +27,9 @@ func retrieve() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	// `security ... -w` prints the password with a trailing newline; strip it
+	// so the retrieved value matches what the user typed (and the Linux path).
+	return bytes.TrimRight(out, "\n"), nil
 }
 
 func forget() error {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"time"
 )
@@ -88,7 +88,7 @@ func listBackups(dir string) ([]string, error) {
 		}
 		out = append(out, name)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out, nil
 }
 

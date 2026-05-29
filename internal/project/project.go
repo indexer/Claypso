@@ -5,7 +5,8 @@ package project
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 )
 
 const SafePlaceholder = "****"
@@ -113,7 +114,7 @@ func (e *Environment) Keys() []string {
 	for i, v := range e.Vars {
 		keys[i] = v.Key
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	return keys
 }
 
@@ -132,12 +133,7 @@ func (p *Project) Env(name string) (*Environment, bool) {
 
 // EnvNames returns environment names sorted alphabetically.
 func (p *Project) EnvNames() []string {
-	names := make([]string, 0, len(p.Envs))
-	for n := range p.Envs {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	return names
+	return slices.Sorted(maps.Keys(p.Envs))
 }
 
 // SoleEnv returns the project's only environment if it has exactly one.

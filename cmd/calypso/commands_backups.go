@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -35,7 +34,7 @@ func vaultBackupsListCmd() *cobra.Command {
 				fmt.Println("No backups yet. They appear after the first successful save.")
 				return nil
 			}
-			w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+			w := newTabWriter()
 			fmt.Fprintln(w, "NAME\tAGE")
 			now := time.Now().UTC()
 			for _, n := range names {
