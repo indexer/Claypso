@@ -95,7 +95,7 @@ func driftCore(e *project.Environment, projectName string, withEntries bool) (Dr
 			if withEntries {
 				for _, kv := range e.Vars {
 					r.Entries = append(r.Entries, DriftEntry{
-						Key: kv.Key, VaultVal: kv.Value, Kind: DriftOnlyInVault,
+						Key: kv.Key, VaultVal: kv.Value.Reveal(), Kind: DriftOnlyInVault,
 					})
 				}
 				sortDriftEntries(r.Entries)
@@ -112,11 +112,11 @@ func driftCore(e *project.Environment, projectName string, withEntries bool) (Dr
 
 	vaultMap := make(map[string]string, len(e.Vars))
 	for _, v := range e.Vars {
-		vaultMap[v.Key] = v.Value
+		vaultMap[v.Key] = v.Value.Reveal()
 	}
 	diskMap := make(map[string]string, len(disk))
 	for _, v := range disk {
-		diskMap[v.Key] = v.Value
+		diskMap[v.Key] = v.Value.Reveal()
 	}
 	seen := make(map[string]bool, len(vaultMap)+len(diskMap))
 	for k, vv := range vaultMap {

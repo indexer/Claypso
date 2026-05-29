@@ -121,11 +121,11 @@ type VarCounts struct {
 func DiffCounts(oldVars, newVars []project.Var) VarCounts {
 	oldMap := make(map[string]string, len(oldVars))
 	for _, v := range oldVars {
-		oldMap[v.Key] = v.Value
+		oldMap[v.Key] = v.Value.Reveal()
 	}
 	newMap := make(map[string]string, len(newVars))
 	for _, v := range newVars {
-		newMap[v.Key] = v.Value
+		newMap[v.Key] = v.Value.Reveal()
 	}
 	var c VarCounts
 	for k, nv := range newMap {

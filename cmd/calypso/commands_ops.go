@@ -139,13 +139,14 @@ func confirmEnvOverwrite(path string, vaultVars []project.Var) (bool, error) {
 func hasUnsyncedEdits(vaultVars, fileVars []project.Var) bool {
 	inVault := make(map[string]string, len(vaultVars))
 	for _, v := range vaultVars {
-		inVault[v.Key] = v.Value
+		inVault[v.Key] = v.Value.Reveal()
 	}
 	for _, fv := range fileVars {
-		if fv.Value == project.SafePlaceholder {
+		val := fv.Value.Reveal()
+		if val == project.SafePlaceholder {
 			continue
 		}
-		if vv, ok := inVault[fv.Key]; !ok || vv != fv.Value {
+		if vv, ok := inVault[fv.Key]; !ok || vv != val {
 			return true
 		}
 	}

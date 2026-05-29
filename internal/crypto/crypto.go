@@ -52,12 +52,14 @@ func Encrypt(passphrase, plaintext []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer c.Clear() // one-shot: release the locked key buffer (memguard sets no finalizer)
 	return c.Seal(plaintext)
 }
 
 // Decrypt reverses Encrypt. Returns ErrDecrypt on any failure.
 func Decrypt(passphrase, blob []byte) ([]byte, error) {
-	plain, _, err := Open(passphrase, blob)
+	plain, c, err := Open(passphrase, blob)
+	c.Clear() // one-shot: we keep no cipher, so release its locked key (Clear nil-guards)
 	return plain, err
 }
 

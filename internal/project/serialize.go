@@ -20,10 +20,11 @@ func serialize(header string, vars []Var, valueFor func(Var) string) string {
 }
 
 func quotedIfNeeded(v Var) string {
-	if needsQuoting(v.Value) {
-		return "\"" + escape(v.Value) + "\""
+	val := v.Value.Reveal()
+	if needsQuoting(val) {
+		return "\"" + escape(val) + "\""
 	}
-	return v.Value
+	return val
 }
 
 // SerializeEnv produces .env file content from variables.

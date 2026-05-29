@@ -74,7 +74,7 @@ func getCmd() *cobra.Command {
 				return nil
 			}
 			for _, kv := range e.Vars {
-				fmt.Printf("%s=%s\n", kv.Key, maybeMask(kv.Value, reveal, hint))
+				fmt.Printf("%s=%s\n", kv.Key, maybeMask(kv.Value.Reveal(), reveal, hint))
 			}
 			return nil
 		},

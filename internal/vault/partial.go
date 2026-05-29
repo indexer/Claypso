@@ -129,6 +129,7 @@ func writePartial(dst string, passphrase []byte, env *partialEnvelope) error {
 	if err != nil {
 		return err
 	}
+	defer crypto.Wipe(plain) // zero the marshalled plaintext after sealing
 	blob, err := crypto.Encrypt(passphrase, plain)
 	if err != nil {
 		return err

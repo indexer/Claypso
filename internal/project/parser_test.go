@@ -27,7 +27,7 @@ func TestParseEnvLongLineNotTruncated(t *testing.T) {
 	}
 	got := map[string]string{}
 	for _, v := range vars {
-		got[v.Key] = v.Value
+		got[v.Key] = v.Value.Reveal()
 	}
 	if len(got["BIG"]) != len(big) {
 		t.Errorf("BIG truncated: got %d bytes, want %d", len(got["BIG"]), len(big))
@@ -53,8 +53,8 @@ API_KEY=sk-abc123`
 		"API_KEY": "sk-abc123",
 	}
 	for _, v := range vars {
-		if checks[v.Key] != v.Value {
-			t.Errorf("%s: expected %q, got %q", v.Key, checks[v.Key], v.Value)
+		if checks[v.Key] != v.Value.Reveal() {
+			t.Errorf("%s: expected %q, got %q", v.Key, checks[v.Key], v.Value.Reveal())
 		}
 	}
 }
@@ -82,8 +82,8 @@ export API_KEY=sk-abc123`
 	if len(vars) != 2 {
 		t.Fatalf("expected 2 vars, got %d", len(vars))
 	}
-	if vars[0].Value != "localhost" {
-		t.Errorf("DB_HOST: expected localhost, got %q", vars[0].Value)
+	if vars[0].Value.Reveal() != "localhost" {
+		t.Errorf("DB_HOST: expected localhost, got %q", vars[0].Value.Reveal())
 	}
 }
 
@@ -95,8 +95,8 @@ API_KEY="sk-abc-123"`
 	if len(vars) != 2 {
 		t.Fatalf("expected 2 vars, got %d", len(vars))
 	}
-	if vars[0].Value != "localhost" {
-		t.Errorf("expected localhost (unquoted), got %q", vars[0].Value)
+	if vars[0].Value.Reveal() != "localhost" {
+		t.Errorf("expected localhost (unquoted), got %q", vars[0].Value.Reveal())
 	}
 }
 
@@ -108,8 +108,8 @@ API_KEY='sk-abc-123'`
 	if len(vars) != 2 {
 		t.Fatalf("expected 2 vars, got %d", len(vars))
 	}
-	if vars[0].Value != "localhost" {
-		t.Errorf("expected localhost (unquoted), got %q", vars[0].Value)
+	if vars[0].Value.Reveal() != "localhost" {
+		t.Errorf("expected localhost (unquoted), got %q", vars[0].Value.Reveal())
 	}
 }
 
@@ -119,8 +119,8 @@ func TestParseEnvValueWithEquals(t *testing.T) {
 	if len(vars) != 1 {
 		t.Fatalf("expected 1 var, got %d", len(vars))
 	}
-	if vars[0].Value != "foo=bar=baz" {
-		t.Errorf("expected 'foo=bar=baz', got %q", vars[0].Value)
+	if vars[0].Value.Reveal() != "foo=bar=baz" {
+		t.Errorf("expected 'foo=bar=baz', got %q", vars[0].Value.Reveal())
 	}
 }
 
@@ -132,11 +132,11 @@ func TestParseEnvLeadingTrailingSpaces(t *testing.T) {
 	if len(vars) != 2 {
 		t.Fatalf("expected 2 vars, got %d", len(vars))
 	}
-	if vars[0].Value != "localhost" {
-		t.Errorf("DB_HOST: expected localhost, got %q", vars[0].Value)
+	if vars[0].Value.Reveal() != "localhost" {
+		t.Errorf("DB_HOST: expected localhost, got %q", vars[0].Value.Reveal())
 	}
-	if vars[1].Value != "  sk-abc  " {
-		t.Errorf("API_KEY: expected '  sk-abc  ', got %q", vars[1].Value)
+	if vars[1].Value.Reveal() != "  sk-abc  " {
+		t.Errorf("API_KEY: expected '  sk-abc  ', got %q", vars[1].Value.Reveal())
 	}
 }
 
@@ -176,11 +176,11 @@ DB_HOST=localhost`
 		t.Errorf("first var should be CERT, got %q", vars[0].Key)
 	}
 	expectedCert := "-----BEGIN CERT-----\nline1\nline2\n-----END CERT-----"
-	if vars[0].Value != expectedCert {
-		t.Errorf("CERT: expected %q, got %q", expectedCert, vars[0].Value)
+	if vars[0].Value.Reveal() != expectedCert {
+		t.Errorf("CERT: expected %q, got %q", expectedCert, vars[0].Value.Reveal())
 	}
-	if vars[1].Value != "localhost" {
-		t.Errorf("DB_HOST: expected localhost, got %q", vars[1].Value)
+	if vars[1].Value.Reveal() != "localhost" {
+		t.Errorf("DB_HOST: expected localhost, got %q", vars[1].Value.Reveal())
 	}
 }
 
@@ -197,8 +197,8 @@ AFTER=hello`
 	if vars[0].Key != "TEXT" {
 		t.Errorf("first var should be TEXT, got %q", vars[0].Key)
 	}
-	if vars[0].Value != "line one\nline two\nline three" {
-		t.Errorf("TEXT: unexpected value: %q", vars[0].Value)
+	if vars[0].Value.Reveal() != "line one\nline two\nline three" {
+		t.Errorf("TEXT: unexpected value: %q", vars[0].Value.Reveal())
 	}
 }
 
@@ -211,7 +211,7 @@ SIMPLE=ok`
 		t.Fatalf("expected 2 vars, got %d", len(vars))
 	}
 	expected := "line1\nline2\ttabbed\\backslash\"quote\""
-	if vars[0].Value != expected {
-		t.Errorf("escape sequences: expected %q, got %q", expected, vars[0].Value)
+	if vars[0].Value.Reveal() != expected {
+		t.Errorf("escape sequences: expected %q, got %q", expected, vars[0].Value.Reveal())
 	}
 }

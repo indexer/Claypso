@@ -24,10 +24,12 @@ const (
 	MaxValueLen = 1 << 20 // 1 MiB
 )
 
-// Var is a single environment variable.
+// Var is a single environment variable. The value is held in a memguard-backed
+// Secret rather than a plain string, so it never lingers as cleartext in the
+// long-lived vault.
 type Var struct {
 	Key   string `json:"key"`
-	Value string `json:"value"`
+	Value Secret `json:"value"`
 }
 
 // ValidKey reports whether s is a usable env var name: a letter or underscore
@@ -60,8 +62,8 @@ func ValidateVars(vars []Var) error {
 		if !ValidKey(v.Key) {
 			return fmt.Errorf("invalid variable name %q: must be a letter or '_' followed by letters, digits, or '_' (max %d chars)", v.Key, MaxKeyLen)
 		}
-		if len(v.Value) > MaxValueLen {
-			return fmt.Errorf("value for %q is too large: %d bytes (max %d)", v.Key, len(v.Value), MaxValueLen)
+		if v.Value.Len() > MaxValueLen {
+			return fmt.Errorf("value for %q is too large: %d bytes (max %d)", v.Key, v.Value.Len(), MaxValueLen)
 		}
 	}
 	return nil
@@ -117,7 +119,7 @@ func (e *Environment) buildIndex() {
 func (e *Environment) Get(key string) (string, bool) {
 	e.buildIndex()
 	if i, ok := e.keyIndex[key]; ok {
-		return e.Vars[i].Value, true
+		return e.Vars[i].Value.Reveal(), true
 	}
 	return "", false
 }
@@ -126,11 +128,11 @@ func (e *Environment) Get(key string) (string, bool) {
 func (e *Environment) Set(key, value string) {
 	e.buildIndex()
 	if i, ok := e.keyIndex[key]; ok {
-		e.Vars[i].Value = value
+		e.Vars[i].Value = SecretFromString(value)
 		return
 	}
 	e.keyIndex[key] = len(e.Vars)
-	e.Vars = append(e.Vars, Var{Key: key, Value: value})
+	e.Vars = append(e.Vars, Var{Key: key, Value: SecretFromString(value)})
 }
 
 // Unset removes a key, preserving the insertion order of the remaining vars

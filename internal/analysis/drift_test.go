@@ -40,7 +40,7 @@ func env(name string, vars ...project.Var) *project.Environment {
 }
 
 func TestDrift_NoDifferences(t *testing.T) {
-	vars := []project.Var{{Key: "A", Value: "1"}, {Key: "B", Value: "2"}}
+	vars := []project.Var{{Key: "A", Value: project.SecretFromString("1")}, {Key: "B", Value: project.SecretFromString("2")}}
 	withFakeDisk(t, vars, nil)
 	e := env("default", vars...)
 	r, err := Drift(e, "myapp")
@@ -57,7 +57,7 @@ func TestDrift_NoDifferences(t *testing.T) {
 
 func TestDrift_MissingDiskFile(t *testing.T) {
 	withFakeDisk(t, nil, &fs.PathError{Op: "open", Err: fs.ErrNotExist})
-	e := env("default", project.Var{Key: "A", Value: "1"})
+	e := env("default", project.Var{Key: "A", Value: project.SecretFromString("1")})
 	r, err := Drift(e, "myapp")
 	if err != nil {
 		t.Fatalf("Drift: %v", err)
@@ -72,7 +72,7 @@ func TestDrift_MissingDiskFile(t *testing.T) {
 
 func TestDrift_PropagatesNonNotExistErrors(t *testing.T) {
 	withFakeDisk(t, nil, errors.New("permission denied"))
-	e := env("default", project.Var{Key: "A", Value: "1"})
+	e := env("default", project.Var{Key: "A", Value: project.SecretFromString("1")})
 	if _, err := Drift(e, "myapp"); err == nil {
 		t.Error("non-NotExist disk errors should propagate, not be silently treated as Missing")
 	}
@@ -80,15 +80,15 @@ func TestDrift_PropagatesNonNotExistErrors(t *testing.T) {
 
 func TestDriftDetails_Categorisation(t *testing.T) {
 	disk := []project.Var{
-		{Key: "A", Value: "1"},         // same
-		{Key: "B", Value: "different"}, // changed
-		{Key: "D", Value: "only-disk"}, // only on disk
+		{Key: "A", Value: project.SecretFromString("1")},         // same
+		{Key: "B", Value: project.SecretFromString("different")}, // changed
+		{Key: "D", Value: project.SecretFromString("only-disk")}, // only on disk
 	}
 	withFakeDisk(t, disk, nil)
 	e := env("default",
-		project.Var{Key: "A", Value: "1"},
-		project.Var{Key: "B", Value: "vault"},
-		project.Var{Key: "C", Value: "only-vault"},
+		project.Var{Key: "A", Value: project.SecretFromString("1")},
+		project.Var{Key: "B", Value: project.SecretFromString("vault")},
+		project.Var{Key: "C", Value: project.SecretFromString("only-vault")},
 	)
 
 	r, err := DriftDetails(e, "myapp")

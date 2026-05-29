@@ -61,9 +61,9 @@ func TestRepair_DedupesDuplicateKeys(t *testing.T) {
 		t.Fatalf("AddProject: %v", err)
 	}
 	e.Vars = []project.Var{
-		{Key: "DB", Value: "old"},
-		{Key: "API", Value: "x"},
-		{Key: "DB", Value: "new"},
+		{Key: "DB", Value: project.SecretFromString("old")},
+		{Key: "API", Value: project.SecretFromString("x")},
+		{Key: "DB", Value: project.SecretFromString("new")},
 	}
 	e.InvalidateIndex()
 
@@ -163,8 +163,8 @@ func TestVerify_DetectsDuplicateVarKeys(t *testing.T) {
 			"default": {
 				Name: "default", Path: "/abs/.env",
 				Vars: []project.Var{
-					{Key: "A", Value: "1"},
-					{Key: "A", Value: "2"},
+					{Key: "A", Value: project.SecretFromString("1")},
+					{Key: "A", Value: project.SecretFromString("2")},
 				},
 			},
 		},

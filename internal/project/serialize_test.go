@@ -9,9 +9,9 @@ import (
 
 func TestSerializeEnv(t *testing.T) {
 	vars := []Var{
-		{Key: "DB_HOST", Value: "localhost"},
-		{Key: "DB_PORT", Value: "5432"},
-		{Key: "API_KEY", Value: "sk-abc123"},
+		{Key: "DB_HOST", Value: SecretFromString("localhost")},
+		{Key: "DB_PORT", Value: SecretFromString("5432")},
+		{Key: "API_KEY", Value: SecretFromString("sk-abc123")},
 	}
 	out := SerializeEnv(vars)
 	parsed := ParseEnv(out)
@@ -22,24 +22,24 @@ func TestSerializeEnv(t *testing.T) {
 		if parsed[i].Key != v.Key {
 			t.Errorf("key %d: expected %q, got %q", i, v.Key, parsed[i].Key)
 		}
-		if parsed[i].Value != v.Value {
-			t.Errorf("value %d: expected %q, got %q", i, v.Value, parsed[i].Value)
+		if parsed[i].Value.Reveal() != v.Value.Reveal() {
+			t.Errorf("value %d: expected %q, got %q", i, v.Value.Reveal(), parsed[i].Value.Reveal())
 		}
 	}
 }
 
 func TestSerializeEnvNeedsQuoting(t *testing.T) {
 	vars := []Var{
-		{Key: "SPACED", Value: "hello world"},
-		{Key: "HASHED", Value: "#comment"},
-		{Key: "QUOTED", Value: `she said "hello"`},
+		{Key: "SPACED", Value: SecretFromString("hello world")},
+		{Key: "HASHED", Value: SecretFromString("#comment")},
+		{Key: "QUOTED", Value: SecretFromString(`she said "hello"`)},
 	}
 	out := SerializeEnv(vars)
 	parsed := ParseEnv(out)
 
 	vals := make(map[string]string)
 	for _, v := range parsed {
-		vals[v.Key] = v.Value
+		vals[v.Key] = v.Value.Reveal()
 	}
 	if vals["SPACED"] != "hello world" {
 		t.Errorf("SPACED: expected 'hello world', got %q", vals["SPACED"])
@@ -76,7 +76,7 @@ func TestSerializeEnvUnicodeRoundtrip(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			out := SerializeEnv([]Var{{Key: tc.key, Value: tc.value}})
+			out := SerializeEnv([]Var{{Key: tc.key, Value: SecretFromString(tc.value)}})
 			parsed := ParseEnv(out)
 			if len(parsed) != 1 {
 				t.Fatalf("expected 1 var, got %d (serialized: %q)", len(parsed), out)
@@ -84,8 +84,8 @@ func TestSerializeEnvUnicodeRoundtrip(t *testing.T) {
 			if parsed[0].Key != tc.key {
 				t.Errorf("key: expected %q, got %q", tc.key, parsed[0].Key)
 			}
-			if parsed[0].Value != tc.value {
-				t.Errorf("value roundtrip mismatch: expected %q, got %q (serialized: %q)", tc.value, parsed[0].Value, out)
+			if parsed[0].Value.Reveal() != tc.value {
+				t.Errorf("value roundtrip mismatch: expected %q, got %q (serialized: %q)", tc.value, parsed[0].Value.Reveal(), out)
 			}
 		})
 	}
@@ -96,8 +96,8 @@ func TestReadWriteEnvFile(t *testing.T) {
 	path := filepath.Join(dir, ".env")
 
 	vars := []Var{
-		{Key: "A", Value: "1"},
-		{Key: "B", Value: "two"},
+		{Key: "A", Value: SecretFromString("1")},
+		{Key: "B", Value: SecretFromString("two")},
 	}
 	if err := WriteEnvFile(path, vars); err != nil {
 		t.Fatalf("WriteEnvFile: %v", err)
@@ -111,11 +111,11 @@ func TestReadWriteEnvFile(t *testing.T) {
 	if len(read) != 2 {
 		t.Fatalf("expected 2 vars, got %d", len(read))
 	}
-	if read[0].Key != "A" || read[0].Value != "1" {
-		t.Errorf("var[0]: expected A=1, got %s=%s", read[0].Key, read[0].Value)
+	if read[0].Key != "A" || read[0].Value.Reveal() != "1" {
+		t.Errorf("var[0]: expected A=1, got %s=%s", read[0].Key, read[0].Value.Reveal())
 	}
-	if read[1].Key != "B" || read[1].Value != "two" {
-		t.Errorf("var[1]: expected B=two, got %s=%s", read[1].Key, read[1].Value)
+	if read[1].Key != "B" || read[1].Value.Reveal() != "two" {
+		t.Errorf("var[1]: expected B=two, got %s=%s", read[1].Key, read[1].Value.Reveal())
 	}
 }
 
@@ -147,14 +147,14 @@ func TestWriteEnvFilePerms(t *testing.T) {
 func TestWriteEnvFileAtomicNoTemp(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".env")
-	if err := WriteEnvFile(path, []Var{{Key: "A", Value: "1"}}); err != nil {
+	if err := WriteEnvFile(path, []Var{{Key: "A", Value: SecretFromString("1")}}); err != nil {
 		t.Fatalf("WriteEnvFile: %v", err)
 	}
 	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
 		t.Errorf("temp file should not remain after an atomic write (stat err=%v)", err)
 	}
 	read, err := ReadEnvFile(path)
-	if err != nil || len(read) != 1 || read[0].Value != "1" {
+	if err != nil || len(read) != 1 || read[0].Value.Reveal() != "1" {
 		t.Errorf("content after atomic write wrong: %+v (err=%v)", read, err)
 	}
 }
@@ -176,9 +176,9 @@ func TestAtomicWriteFileCleansTempOnRenameFailure(t *testing.T) {
 
 func TestSerializeSafeEnv(t *testing.T) {
 	vars := []Var{
-		{Key: "DB_HOST", Value: "localhost"},
-		{Key: "DB_PORT", Value: "5432"},
-		{Key: "API_KEY", Value: "sk-secret-abc123"},
+		{Key: "DB_HOST", Value: SecretFromString("localhost")},
+		{Key: "DB_PORT", Value: SecretFromString("5432")},
+		{Key: "API_KEY", Value: SecretFromString("sk-secret-abc123")},
 	}
 	out := SerializeSafeEnv(vars)
 
@@ -196,8 +196,8 @@ func TestSerializeSafeEnv(t *testing.T) {
 
 	parsed := ParseEnv(out)
 	for _, v := range parsed {
-		if v.Value != "****" {
-			t.Errorf("key %q: expected ****, got %q", v.Key, v.Value)
+		if v.Value.Reveal() != "****" {
+			t.Errorf("key %q: expected ****, got %q", v.Key, v.Value.Reveal())
 		}
 	}
 }
@@ -207,8 +207,8 @@ func TestWriteSafeEnvFile(t *testing.T) {
 	path := filepath.Join(dir, ".env")
 
 	vars := []Var{
-		{Key: "SECRET", Value: "real-value"},
-		{Key: "TOKEN", Value: "ghp_12345"},
+		{Key: "SECRET", Value: SecretFromString("real-value")},
+		{Key: "TOKEN", Value: SecretFromString("ghp_12345")},
 	}
 	if err := WriteSafeEnvFile(path, vars); err != nil {
 		t.Fatalf("WriteSafeEnvFile: %v", err)
@@ -222,16 +222,16 @@ func TestWriteSafeEnvFile(t *testing.T) {
 		t.Fatalf("expected 2 vars, got %d", len(read))
 	}
 	for _, v := range read {
-		if v.Value != "****" {
-			t.Errorf("key %q: value should be ****, got %q", v.Key, v.Value)
+		if v.Value.Reveal() != "****" {
+			t.Errorf("key %q: value should be ****, got %q", v.Key, v.Value.Reveal())
 		}
 	}
 }
 
 func TestSerializeExampleEnv(t *testing.T) {
 	vars := []Var{
-		{Key: "DB_HOST", Value: "localhost"},
-		{Key: "API_KEY", Value: "secret"},
+		{Key: "DB_HOST", Value: SecretFromString("localhost")},
+		{Key: "API_KEY", Value: SecretFromString("secret")},
 	}
 	out := SerializeExampleEnv(vars)
 
@@ -246,8 +246,8 @@ func TestSerializeExampleEnv(t *testing.T) {
 
 	parsed := ParseEnv(out)
 	for _, v := range parsed {
-		if v.Value != "" {
-			t.Errorf("key %q: expected empty value, got %q", v.Key, v.Value)
+		if v.Value.Reveal() != "" {
+			t.Errorf("key %q: expected empty value, got %q", v.Key, v.Value.Reveal())
 		}
 	}
 }
@@ -257,8 +257,8 @@ func TestWriteExampleEnvFile(t *testing.T) {
 	path := filepath.Join(dir, ".env")
 
 	vars := []Var{
-		{Key: "SECRET", Value: "real-val"},
-		{Key: "TOKEN", Value: "ghp_12345"},
+		{Key: "SECRET", Value: SecretFromString("real-val")},
+		{Key: "TOKEN", Value: SecretFromString("ghp_12345")},
 	}
 	if err := WriteExampleEnvFile(path, vars); err != nil {
 		t.Fatalf("WriteExampleEnvFile: %v", err)
@@ -272,8 +272,8 @@ func TestWriteExampleEnvFile(t *testing.T) {
 		t.Fatalf("expected 2 vars, got %d", len(read))
 	}
 	for _, v := range read {
-		if v.Value != "" {
-			t.Errorf("key %q: expected empty value, got %q", v.Key, v.Value)
+		if v.Value.Reveal() != "" {
+			t.Errorf("key %q: expected empty value, got %q", v.Key, v.Value.Reveal())
 		}
 	}
 }

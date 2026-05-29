@@ -39,18 +39,18 @@ func TestMaybeMaskDefaultHidesLength(t *testing.T) {
 }
 
 func TestHasUnsyncedEdits(t *testing.T) {
-	vault := []project.Var{{Key: "A", Value: "1"}, {Key: "B", Value: "2"}}
+	vault := []project.Var{{Key: "A", Value: project.SecretFromString("1")}, {Key: "B", Value: project.SecretFromString("2")}}
 
 	tests := []struct {
 		name string
 		file []project.Var
 		want bool
 	}{
-		{"identical", []project.Var{{Key: "A", Value: "1"}, {Key: "B", Value: "2"}}, false},
-		{"fully masked (safe file)", []project.Var{{Key: "A", Value: project.SafePlaceholder}, {Key: "B", Value: project.SafePlaceholder}}, false},
-		{"new real key on disk", []project.Var{{Key: "A", Value: "1"}, {Key: "C", Value: "new"}}, true},
-		{"changed real value on disk", []project.Var{{Key: "A", Value: "changed"}}, true},
-		{"key removed on disk only", []project.Var{{Key: "A", Value: "1"}}, false}, // pull re-adds B; not a lost edit
+		{"identical", []project.Var{{Key: "A", Value: project.SecretFromString("1")}, {Key: "B", Value: project.SecretFromString("2")}}, false},
+		{"fully masked (safe file)", []project.Var{{Key: "A", Value: project.SecretFromString(project.SafePlaceholder)}, {Key: "B", Value: project.SecretFromString(project.SafePlaceholder)}}, false},
+		{"new real key on disk", []project.Var{{Key: "A", Value: project.SecretFromString("1")}, {Key: "C", Value: project.SecretFromString("new")}}, true},
+		{"changed real value on disk", []project.Var{{Key: "A", Value: project.SecretFromString("changed")}}, true},
+		{"key removed on disk only", []project.Var{{Key: "A", Value: project.SecretFromString("1")}}, false}, // pull re-adds B; not a lost edit
 		{"empty file", nil, false},
 	}
 	for _, tc := range tests {

@@ -51,8 +51,8 @@ func TestMigrateV1(t *testing.T) {
 				Path:      "/tmp/alpha/.env",
 				UpdatedAt: "2024-02-01T00:00:00Z",
 				Vars: []project.Var{
-					{Key: "DB_HOST", Value: "localhost"},
-					{Key: "DB_PORT", Value: "5432"},
+					{Key: "DB_HOST", Value: project.SecretFromString("localhost")},
+					{Key: "DB_PORT", Value: project.SecretFromString("5432")},
 				},
 			},
 		},

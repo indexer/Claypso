@@ -28,27 +28,27 @@ func TestUnsetPreservesOrder(t *testing.T) {
 }
 
 func TestDedupeKeys(t *testing.T) {
-	in := []Var{{Key: "A", Value: "1"}, {Key: "B", Value: "2"}, {Key: "A", Value: "3"}}
+	in := []Var{{Key: "A", Value: SecretFromString("1")}, {Key: "B", Value: SecretFromString("2")}, {Key: "A", Value: SecretFromString("3")}}
 	out := DedupeKeys(in)
 	if len(out) != 2 {
 		t.Fatalf("expected 2 vars, got %d: %+v", len(out), out)
 	}
 	// First-appearance position, last value wins.
-	if out[0].Key != "A" || out[0].Value != "3" {
+	if out[0].Key != "A" || out[0].Value.Reveal() != "3" {
 		t.Errorf("A should be at index 0 with last value 3, got %+v", out[0])
 	}
-	if out[1].Key != "B" || out[1].Value != "2" {
+	if out[1].Key != "B" || out[1].Value.Reveal() != "2" {
 		t.Errorf("B should be at index 1 with value 2, got %+v", out[1])
 	}
 }
 
 func TestValidateVars(t *testing.T) {
-	good := []Var{{Key: "DB_HOST", Value: "x"}, {Key: "_K2", Value: "y"}}
+	good := []Var{{Key: "DB_HOST", Value: SecretFromString("x")}, {Key: "_K2", Value: SecretFromString("y")}}
 	if err := ValidateVars(good); err != nil {
 		t.Errorf("ValidateVars(good) = %v, want nil", err)
 	}
 
-	badKey := []Var{{Key: "OK", Value: "x"}, {Key: "BAD-KEY", Value: "y"}}
+	badKey := []Var{{Key: "OK", Value: SecretFromString("x")}, {Key: "BAD-KEY", Value: SecretFromString("y")}}
 	err := ValidateVars(badKey)
 	if err == nil {
 		t.Fatal("ValidateVars(badKey) = nil, want error")
@@ -61,7 +61,7 @@ func TestValidateVars(t *testing.T) {
 	if ValidKey(strings.Repeat("K", MaxKeyLen+1)) {
 		t.Error("ValidKey should reject a key longer than MaxKeyLen")
 	}
-	bigVal := []Var{{Key: "BIG", Value: strings.Repeat("v", MaxValueLen+1)}}
+	bigVal := []Var{{Key: "BIG", Value: SecretFromString(strings.Repeat("v", MaxValueLen+1))}}
 	if err := ValidateVars(bigVal); err == nil {
 		t.Error("ValidateVars should reject a value larger than MaxValueLen")
 	}

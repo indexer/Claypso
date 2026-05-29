@@ -83,7 +83,7 @@ func (p *envParser) feedLine(raw string) {
 		p.multilineBuf.WriteString(val[1:])
 		return
 	}
-	p.vars = append(p.vars, Var{Key: key, Value: unquote(val)})
+	p.vars = append(p.vars, Var{Key: key, Value: SecretFromString(unquote(val))})
 }
 
 func (p *envParser) commitMultiline() {
@@ -92,7 +92,7 @@ func (p *envParser) commitMultiline() {
 		val = unescape(val)
 	}
 	if p.multilineKey != "" {
-		p.vars = append(p.vars, Var{Key: p.multilineKey, Value: val})
+		p.vars = append(p.vars, Var{Key: p.multilineKey, Value: SecretFromString(val)})
 	}
 	p.multilineKey = ""
 	p.multilineQ = 0
