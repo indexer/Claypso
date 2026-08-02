@@ -42,7 +42,9 @@ your machine.`,
 		listCmd(), pullCmd(), pushCmd(), diffCmd(), gapsCmd(),
 		removeCmd(), dashboardCmd(), completionCmd(),
 		exportCmd(), importCmd(), keychainCmd(), versionCmd(),
-		envCmd(), vaultCmd(), driftCmd(),
+		envCmd(), vaultCmd(), driftCmd(), lockdownCmd(),
+		exposureCmd(), agentCmd(), auditCmd(), syncCmd(),
+		strictCmd(), operationCmd(), brokerCmd(),
 	)
 	root.Version = version
 	return root
@@ -148,7 +150,8 @@ func offerKeychainSave(pw []byte) {
 	if unattended() {
 		return
 	}
-	if _, err := keychain.Retrieve(); err == nil {
+	if stored, err := keychain.Retrieve(); err == nil {
+		clearBytes(stored)
 		return
 	}
 	ok, err := confirmYesNo(os.Stderr, "Save passphrase to OS keychain?", false)

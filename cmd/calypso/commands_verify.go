@@ -30,7 +30,7 @@ can't know what they were meant to be relative to, so re-add with an
 absolute --path.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			v, pw, err := openVault(ctx)
+			v, pw, err := openOwnerVault(ctx, "vault verify")
 			if err != nil {
 				return err
 			}

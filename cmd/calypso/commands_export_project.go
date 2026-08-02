@@ -28,11 +28,16 @@ targeted backup of just the env you care about.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			spec, dst := args[0], args[1]
 			ctx := cmd.Context()
-			v, pw, err := openVault(ctx)
+			v, pw, err := openOwnerVault(ctx, "vault export-project")
 			if err != nil {
 				return err
 			}
 			defer clearBytes(pw)
+			gateErr := guardReveal(v.Lockdown, v.LockdownUnattendedOK, "vault export-project")
+			recordAudit("export-project", spec, 0, gateErr)
+			if gateErr != nil {
+				return gateErr
+			}
 			if err := v.ExportProject(ctx, spec, dst, pw); err != nil {
 				return err
 			}

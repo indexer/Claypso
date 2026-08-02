@@ -27,7 +27,7 @@ func envListCmd() *cobra.Command {
 		Short: "List the environments registered for a project",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			v, pw, err := openVault(cmd.Context())
+			v, pw, err := openMetadataVault(cmd.Context(), "env list")
 			if err != nil {
 				return err
 			}
@@ -74,7 +74,7 @@ func envCopyCmd() *cobra.Command {
 			}
 
 			ctx := cmd.Context()
-			v, pw, err := openVault(ctx)
+			v, pw, err := openOwnerVault(ctx, "env copy")
 			if err != nil {
 				return err
 			}

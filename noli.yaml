@@ -1,0 +1,47 @@
+# Starter noli.yaml for bootstrapping a new Noli knowledge base.
+# 1. Copy to the repository root as noli.yaml and set project.name.
+# 2. Copy noli-starter-concepts.yaml to .noli/concepts.yaml.
+# 3. Run: noli generate --config noli.yaml --apply --format json
+# .noli/concepts.yaml stays the single source of truth: add concepts there
+# and re-run generate --apply; the Markdown bundle and its knowledge graph
+# are rendered deterministically from it.
+version: 1
+project:
+  name: calypso
+  description: Local encrypted manager for projects' .env files; keeps secrets out of AI agent context.
+knowledge:
+  root: knowledge
+concept_types:
+  - type: Domain Entity
+    directory: concepts
+    identity_fields: [title]
+    required_fields: [title, description]
+  - type: Business Rule
+    directory: rules
+    identity_fields: [title]
+    required_fields: [title, description]
+  - type: Application Component
+    directory: components
+    identity_fields: [title]
+    required_fields: [title, description]
+  - type: Workflow
+    directory: workflows
+    identity_fields: [title]
+    required_fields: [title, description]
+  - type: Architecture Decision
+    directory: decisions
+    identity_fields: [title]
+    required_fields: [title, description]
+relationships:
+  - predicate: applies-to
+  - predicate: depends-on
+  - predicate: enforced-by
+  - predicate: uses
+  - predicate: follows
+retrieval:
+  search_limit: 5
+  max_hops: 1
+  max_documents: 8
+  max_characters: 14000
+generation:
+  concept_files: [.noli/concepts.yaml]

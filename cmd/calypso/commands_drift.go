@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/yemon/calypso/internal/analysis"
@@ -28,11 +29,19 @@ CI guards ("alert me if .env was edited outside calypso").
   --reveal   show real values in --details output (default: masked)`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			v, pw, err := openVault(cmd.Context())
+			v, pw, err := openOwnerVault(cmd.Context(), "drift")
 			if err != nil {
 				return err
 			}
 			clearBytes(pw)
+
+			if reveal {
+				err := guardReveal(v.Lockdown, v.LockdownUnattendedOK, "drift --reveal")
+				recordAudit("drift-reveal", strings.Join(args, " "), 0, err)
+				if err != nil {
+					return err
+				}
+			}
 
 			refs := pickRefs(v, args)
 			if len(refs) == 0 {

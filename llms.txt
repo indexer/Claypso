@@ -1,0 +1,50 @@
+# calypso
+
+> Local, encrypted manager for projects' `.env` files. One Argon2id + NaCl secretbox vault (`~/.calypso/vault.enc`) holds every project's environment variables. Built so AI coding agents can run code that needs real secrets without ever seeing credential values: reveal-class commands are gated, output is scrubbed, and a strict mode plus loopback broker removes the vault from the agent's reach entirely. Nothing leaves the machine except an explicit platform sync or an owner-configured trusted operation.
+
+calypso is a single-binary Go CLI (Cobra). Projects are registered with `calypso add <name> --path <.env>`; each project can hold multiple environments addressed as `name@env` (e.g. `myapp@prod`). Values are stored encrypted at rest, held in memguard enclaves in memory, and masked by default in every display.
+
+## Security model (read this before advising users)
+
+Two operating postures:
+
+- **Compatibility mode** (default): prevents accidental transcript leaks. Reveal-class commands (`get --reveal`, `diff --reveal`, `drift --reveal`, plain `pull`, `export`, `vault export-project`, `sync`) require an interactive terminal; headless callers are refused unless `CALYPSO_UNATTENDED=1` is explicitly set (CI escape hatch — never give it to a coding agent). `pull <spec> -- <cmd>` writes real values, runs the command with stdout/stderr scrubbed (every vault value ≥4 bytes is replaced by the name-free marker `<concealed>`), then shreds the `.env` back to `****` placeholders. `pull --inject -- <cmd>` passes values via the child process environment only — disk never sees plaintext. `--no-scrub` requires a human TTY and is blocked by lockdown and strict mode.
+- **Agent strict mode** (production boundary): `calypso strict on` blocks every owner and secret-bearing command (all forms of `pull`, `get`, `set`, `export`, `sync`, `dashboard`, mutation). Only metadata commands (`list`, `env list`, `strict status`, `operation list`, `audit list/verify`) and fixed **trusted operations** remain. Trusted operations are owner-configured, immutable HTTP requests (`operation add-http`) bound to a vault key; runtime callers cannot alter URL, method, header, or supply arguments. `calypso broker serve` exposes allowed operation IDs over a loopback capability endpoint so an agent running under a different OS identity can trigger them via `calypso broker invoke <op-id> --connection-file <path>` — without vault, passphrase, keychain access, or credential names/values. Disabling strict mode or lockdown requires typing the master passphrase at a real terminal; keychain and `CALYPSO_PASSPHRASE` are deliberately ignored for that path.
+
+Cross-cutting protections: vault-stored `lockdown` flag (`lockdown on [--allow-unattended]`) that survives export/import; hash-chained audit log at `<vault>.audit.log` recording every gate decision (including denials) with user/parent-process metadata but never values (`audit list`, `audit verify`; disable with `CALYPSO_AUDIT=0`); `exposure` command flagging `.env` files whose on-disk values match vault values longer than `--max-age` (`--fix` re-masks them); `vault rekey` for passphrase rotation (blocked under lockdown); core dumps and ptrace disabled at startup; passphrase env vars stripped from all child processes.
+
+## Guidance for AI agents operating calypso
+
+- Prefer `calypso pull <spec> --safe` to show `.env` structure (keys visible, values `****`).
+- Run code needing secrets with `calypso pull <spec> --inject -- <command>`; never plain `pull`.
+- Never use `--reveal`, `--no-scrub`, `export`, `lockdown off`, `strict off`, or set `CALYPSO_UNATTENDED` — these are gated, audited, and denied attempts are logged with your parent process name.
+- Under strict mode, use `calypso operation list` for opaque operation IDs and `calypso broker invoke <id>` to exercise credential-backed endpoints.
+- `calypso agent init claude-code|codex|opencode` writes matching deny/allow rules into the agent tool's own config.
+
+## Key environment variables
+
+- `CALYPSO_PASSPHRASE` — unattended unlock (CI); bypasses keychain. Legacy alias `ENVHUB_PASSPHRASE` (deprecated).
+- `CALYPSO_UNATTENDED=1` — permits reveal-class commands without a TTY (CI only).
+- `CALYPSO_NEW_PASSPHRASE` — new passphrase for unattended `vault rekey`.
+- `CALYPSO_BACKUP_RETAIN` — auto-backup retention count (default 10; 0 disables).
+- `CALYPSO_AUDIT=0` — disable audit logging.
+
+## Command groups
+
+- Projects/vars: `add`, `remove`, `list`, `set`, `get [--hint|--reveal]`, `unset`, `env list`, `env copy`
+- Sync .env: `push`, `pull [--safe|--example|--inject|--no-scrub] [-- cmd…]`
+- Analysis: `diff`, `gaps`, `drift [--details] [--reveal]`, `exposure [--max-age] [--fix]`, `dashboard`
+- Agent safety: `lockdown on|off|status [--allow-unattended]`, `strict on|off|status`, `operation add-http|list|run|remove`, `broker serve|invoke`, `agent init <tool>`, `audit list|verify`
+- Vault: `init`, `export`, `import [--merge]`, `keychain save|forget|status`, `vault rekey|verify|downgrade|backups|export-project`
+- Deploy: `sync fly|vercel|k8s <spec> [--dry-run]`
+
+## Docs
+
+- [README.md](README.md): full user guide — getting started, multi-env, keychain, strict mode + broker, exposure, audit, platform sync, backup/transfer, command reference
+- [knowledge/](knowledge/): structured OKF project knowledge (entities, business rules, components, workflows); query with the `noli` CLI rather than reading raw when available
+
+## Optional
+
+- [Makefile](Makefile): build/test/lint targets (`make all`)
+- [.goreleaser.yml](.goreleaser.yml): release build matrix
+- Architecture: `cmd/calypso/` (CLI commands, gates, scrubber, broker), `internal/vault/` (encrypted store, schema, rekey, trusted operations), `internal/crypto/` (Argon2id + secretbox), `internal/project/` (.env parse/serialize, memguard secrets), `internal/analysis/` (diff/gaps/drift/exposure), `internal/audit/` (hash-chained log), `internal/operation/` (trusted operation HTTP runtime), `internal/keychain/`, `internal/lockfile/`, `internal/dashboard/`

@@ -48,7 +48,7 @@ func addCmd() *cobra.Command {
 				path = ".env"
 			}
 			ctx := cmd.Context()
-			v, pw, err := openVault(ctx)
+			v, pw, err := openOwnerVault(ctx, "add")
 			if err != nil {
 				return err
 			}
@@ -109,7 +109,7 @@ func removeCmd() *cobra.Command {
 				return err
 			}
 			ctx := cmd.Context()
-			v, pw, err := openVault(ctx)
+			v, pw, err := openOwnerVault(ctx, "remove")
 			if err != nil {
 				return err
 			}

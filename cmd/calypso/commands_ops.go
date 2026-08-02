@@ -15,7 +15,7 @@ func listCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List all registered projects and their environments",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			v, pw, err := openVault(cmd.Context())
+			v, pw, err := openMetadataVault(cmd.Context(), "list")
 			if err != nil {
 				return err
 			}
@@ -39,7 +39,7 @@ func listCmd() *cobra.Command {
 }
 
 func pullCmd() *cobra.Command {
-	var safe, example, force bool
+	var safe, example, force, inject, noScrub bool
 	cmd := &cobra.Command{
 		Use:   "pull <project[@env]> [-- command...]",
 		Short: "Write the env's values out to its .env file",
@@ -53,17 +53,39 @@ template for documentation or git.
 
 A trailing command (after --) is executed with the real .env in place,
 then the .env is immediately overwritten with safe (****) values when the
-command exits — even on failure or interrupt.
+command exits — even on failure or interrupt. The command's output is
+scrubbed: any secret value appearing in it is replaced with
+<concealed>. Scrubbing pipes the child's stdout/stderr, so
+TTY-dependent output (colors, progress bars) degrades; pass --no-scrub
+to opt out. --no-scrub is an unsafe reveal-class option: it requires an
+interactive terminal and is blocked by lockdown and agent strict mode.
+
+With --inject (requires a trailing command), the .env file is not touched
+at all: real values are passed to the command via its process environment
+only, so the disk never sees plaintext.
+
+A plain pull (real values, no trailing command) is a reveal-class
+operation: it needs an interactive terminal or CALYPSO_UNATTENDED=1, and
+is refused entirely while 'calypso lockdown' is on.
 
 Flags:
   -s, --safe      write masked **** values (LLM-safe)
-  -e, --example   write empty values (.env.example template)`,
+  -e, --example   write empty values (.env.example template)
+      --inject    with -- command: env-only injection, no .env write
+      --no-scrub  with -- command: pass output through unfiltered`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			spec := args[0]
 			wipeCmd := args[1:]
 
-			v, pw, err := openVault(cmd.Context())
+			if inject && len(wipeCmd) == 0 {
+				return fmt.Errorf("--inject requires a trailing command (calypso pull %s --inject -- <cmd>)", spec)
+			}
+			if noScrub && len(wipeCmd) == 0 {
+				return fmt.Errorf("--no-scrub requires a trailing command")
+			}
+
+			v, pw, err := openOwnerVault(cmd.Context(), "pull")
 			if err != nil {
 				return err
 			}
@@ -71,6 +93,13 @@ Flags:
 			_, e, err := v.ResolveEnv(spec)
 			if err != nil {
 				return err
+			}
+			if noScrub {
+				gateErr := guardUnsafeOutput(v.Lockdown, v.AgentStrict, "pull --no-scrub")
+				recordAudit("pull-no-scrub", spec, len(e.Vars), gateErr)
+				if gateErr != nil {
+					return gateErr
+				}
 			}
 
 			switch {
@@ -87,8 +116,18 @@ Flags:
 				fmt.Printf("Wrote %d safe variable(s) to %s\n", len(e.Vars), e.Path)
 				return nil
 			case len(wipeCmd) > 0:
-				return wipeAndRun(e.Path, e.Vars, wipeCmd)
+				op := "pull-run"
+				if inject {
+					op = "pull-inject"
+				}
+				recordAudit(op, spec+" -- "+wipeCmd[0], len(e.Vars), nil)
+				return wipeAndRun(e.Path, e.Vars, wipeCmd, inject, !noScrub)
 			default:
+				err := guardReveal(v.Lockdown, v.LockdownUnattendedOK, "pull (write real values)")
+				recordAudit("pull", spec, len(e.Vars), err)
+				if err != nil {
+					return err
+				}
 				if !force {
 					ok, err := confirmEnvOverwrite(e.Path, e.Vars)
 					if err != nil {
@@ -102,6 +141,7 @@ Flags:
 					return err
 				}
 				fmt.Printf("Wrote %d variable(s) to %s\n", len(e.Vars), e.Path)
+				fmt.Fprintf(os.Stderr, "Real values are now on disk — run `calypso pull %s --safe` when done (or schedule `calypso exposure`).\n", spec)
 				return nil
 			}
 		},
@@ -109,6 +149,9 @@ Flags:
 	cmd.Flags().BoolVarP(&safe, "safe", "s", false, "write masked values (****) for LLM/teammate sharing")
 	cmd.Flags().BoolVarP(&example, "example", "e", false, "write empty values for .env.example")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "overwrite the .env without confirming unsynced local edits")
+	cmd.Flags().BoolVar(&inject, "inject", false, "with a trailing command: pass real values via the child's environment only, never write them to .env")
+	cmd.Flags().BoolVar(&noScrub, "no-scrub", false, "with a trailing command: don't scrub secret values from its output")
+	cmd.MarkFlagsMutuallyExclusive("safe", "example", "inject")
 	return cmd
 }
 
@@ -153,17 +196,40 @@ func hasUnsyncedEdits(vaultVars, fileVars []project.Var) bool {
 	return false
 }
 
-// wipeAndRun writes real .env, executes the command, and overwrites with safe values.
-func wipeAndRun(envPath string, vars []project.Var, command []string) error {
-	if err := project.WriteEnvFile(envPath, vars); err != nil {
-		return err
+// wipeAndRun executes the command with real values available and guarantees
+// the on-disk .env never keeps them afterwards. In file mode (inject=false)
+// the real .env is written first and overwritten with safe values when the
+// command exits. In inject mode the .env is never touched: values reach the
+// child through its process environment only.
+//
+// With scrub, the child's stdout/stderr are filtered so any secret value
+// appearing in them is written out as the name-free <concealed> marker.
+func wipeAndRun(envPath string, vars []project.Var, command []string, inject, scrub bool) error {
+	if !inject {
+		if err := project.WriteEnvFile(envPath, vars); err != nil {
+			return err
+		}
 	}
 
 	c := exec.Command(command[0], command[1:]...)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
-	c.Env = stripSensitiveEnv(os.Environ())
+	env := stripSensitiveEnv(os.Environ())
+	if inject {
+		for _, kv := range vars {
+			env = append(env, kv.Key+"="+kv.Value.Reveal())
+		}
+	}
+	c.Env = env
+
+	var outScrub, errScrub *scrubWriter
+	if scrub {
+		outScrub = newScrubWriter(os.Stdout, vars)
+		errScrub = newScrubWriter(os.Stderr, vars)
+		c.Stdout = outScrub
+		c.Stderr = errScrub
+	}
 	// Put the child in its own process group on Unix so signals (Ctrl+C)
 	// reach it directly rather than us. Windows has no equivalent and the
 	// helper is a no-op there — see wipe_procgroup_*.go.
@@ -171,8 +237,21 @@ func wipeAndRun(envPath string, vars []project.Var, command []string) error {
 
 	runErr := c.Run()
 
-	if err := project.WriteSafeEnvFile(envPath, vars); err != nil {
-		fmt.Fprintf(os.Stderr, "calypso: failed to wipe .env after command: %v\n", err)
+	if scrub {
+		// Flush the held-back tails; c.Run has already waited for the pipe
+		// copiers, so these are the final bytes.
+		if err := outScrub.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "calypso: flushing scrubbed stdout: %v\n", err)
+		}
+		if err := errScrub.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "calypso: flushing scrubbed stderr: %v\n", err)
+		}
+	}
+
+	if !inject {
+		if err := project.WriteSafeEnvFile(envPath, vars); err != nil {
+			fmt.Fprintf(os.Stderr, "calypso: failed to wipe .env after command: %v\n", err)
+		}
 	}
 
 	if runErr != nil {
@@ -192,7 +271,7 @@ func pushCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			v, pw, err := openVault(ctx)
+			v, pw, err := openOwnerVault(ctx, "push")
 			if err != nil {
 				return err
 			}

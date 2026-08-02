@@ -27,6 +27,17 @@ The exported file is still encrypted — you need the master passphrase
 to use it on another machine via 'calypso import'.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			v, pw, err := openOwnerVault(cmd.Context(), "export")
+			if err != nil {
+				return err
+			}
+			clearBytes(pw)
+			defer v.Close()
+			gateErr := guardReveal(v.Lockdown, v.LockdownUnattendedOK, "export")
+			recordAudit("export", "", 0, gateErr)
+			if gateErr != nil {
+				return gateErr
+			}
 			blob, err := os.ReadFile(vaultPath)
 			if err != nil {
 				return fmt.Errorf("vault not found at %s: %w", vaultPath, err)
@@ -81,6 +92,9 @@ Pass --base64 to read a base64-encoded blob from the named file (useful
 when restoring from a password manager or git note).`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := guardExistingOwner(cmd.Context(), "import"); err != nil {
+				return err
+			}
 			blob, err := readImportBlob(args[0], base64In)
 			if err != nil {
 				return err
@@ -137,6 +151,7 @@ func mergeImport(cmd *cobra.Command, blob []byte, force bool) error {
 	if err != nil {
 		return fmt.Errorf("decrypt import: %w", err)
 	}
+	defer crypto.Wipe(plain)
 	if !vault.IsPartialExport(plain) {
 		return fmt.Errorf("--merge expects a partial-export blob (from `vault export-project`); use plain `import` for full-vault restores")
 	}
@@ -145,6 +160,9 @@ func mergeImport(cmd *cobra.Command, blob []byte, force bool) error {
 	v, err := vault.Load(ctx, vaultPath, pw)
 	if err != nil {
 		return fmt.Errorf("load current vault: %w", err)
+	}
+	if v.AgentStrict {
+		return fmt.Errorf("import --merge is blocked: vault is in agent strict mode")
 	}
 	tmp, err := writeTempFromBlob(blob)
 	if err != nil {

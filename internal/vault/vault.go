@@ -27,9 +27,23 @@ import (
 // (e.g. a project gains a second env), the previous on-disk file is backed
 // up to vault.enc.v<N>.bak before being overwritten.
 type Vault struct {
-	Version   int                         `json:"version"`
-	Projects  map[string]*project.Project `json:"projects"`
-	CreatedAt string                      `json:"created_at"`
+	Version           int                          `json:"version"`
+	Projects          map[string]*project.Project  `json:"projects"`
+	CreatedAt         string                       `json:"created_at"`
+	TrustedOperations map[string]*TrustedOperation `json:"trusted_operations,omitempty"`
+	// Lockdown blocks reveal-class CLI commands while set (see `calypso
+	// lockdown`). Stored inside the encrypted vault so an unattended process
+	// cannot flip it; only representable in schema v2.
+	Lockdown bool `json:"lockdown,omitempty"`
+	// LockdownUnattendedOK softens Lockdown for deploy pipelines: while both
+	// are set, reveal-class commands are allowed when CALYPSO_UNATTENDED=1 is
+	// present (an explicitly configured CI context) and blocked otherwise.
+	// Chosen at `lockdown on --allow-unattended` time; meaningless alone.
+	LockdownUnattendedOK bool `json:"lockdown_unattended_ok,omitempty"`
+	// AgentStrict is the production agent boundary. While set, the CLI allows
+	// only metadata-only commands and fixed Trusted Operations; arbitrary
+	// secret-bearing execution and every owner mutation are refused.
+	AgentStrict bool `json:"agent_strict,omitempty"`
 
 	loadedVersion int            `json:"-"` // 0 for brand-new vaults; otherwise the version read from disk
 	lastBackupErr error          `json:"-"` // set by writeUnlocked when auto-backup fails (non-fatal)
@@ -42,8 +56,14 @@ type Vault struct {
 // which decrypts once and never re-encrypts. CLI commands exit shortly after
 // their final save, so the OS reclaims the memory regardless.
 func (v *Vault) Close() {
-	v.cipher.Clear()
+	if v.cipher != nil {
+		v.cipher.Clear()
+	}
 }
+
+// LoadedVersion reports the encrypted schema version read from disk. It is
+// metadata only and is used for accurate recovery-backup messages.
+func (v *Vault) LoadedVersion() int { return v.loadedVersion }
 
 // LastBackupErr returns the most recent auto-backup error, or nil. The save
 // itself succeeded; this surfaces backup problems (disk full, perms) so the
@@ -160,9 +180,10 @@ func withLock(vaultPath string, fn func() error) (err error) {
 // New creates an empty vault (in memory only).
 func New() *Vault {
 	return &Vault{
-		Version:   schemaVersion,
-		Projects:  make(map[string]*project.Project),
-		CreatedAt: nowStamp(),
+		Version:           schemaVersion,
+		Projects:          make(map[string]*project.Project),
+		TrustedOperations: make(map[string]*TrustedOperation),
+		CreatedAt:         nowStamp(),
 	}
 }
 

@@ -12,7 +12,7 @@ import (
 
 // schemaVersion bumps when the on-disk layout changes. Load handles older
 // versions transparently via unmarshalAndMigrate / migrateV1.
-const schemaVersion = 2
+const schemaVersion = 3
 
 // v1Project / v1Vault are the on-disk shapes for schema version 1. Used by
 // migrateV1 (read) and marshalForVersion (write back when v1-representable).
@@ -27,6 +27,17 @@ type v1Vault struct {
 	Version   int                   `json:"version"`
 	Projects  map[string]*v1Project `json:"projects"`
 	CreatedAt string                `json:"created_at"`
+}
+
+// v2Vault freezes the schema-v2 shape so writing an explicitly downgraded
+// representation can never accidentally include schema-v3 strict-operation
+// fields.
+type v2Vault struct {
+	Version              int                         `json:"version"`
+	Projects             map[string]*project.Project `json:"projects"`
+	CreatedAt            string                      `json:"created_at"`
+	Lockdown             bool                        `json:"lockdown,omitempty"`
+	LockdownUnattendedOK bool                        `json:"lockdown_unattended_ok,omitempty"`
 }
 
 // writeUnlocked picks the minimum schema version that can represent the
@@ -103,6 +114,12 @@ func (v *Vault) writeUnlocked(ctx context.Context, path string, passphrase []byt
 // represent the current in-memory vault. A vault is v1-representable iff
 // every project has exactly one env whose name is project.DefaultEnvName.
 func (v *Vault) inferOnDiskVersion() int {
+	if v.AgentStrict || len(v.TrustedOperations) > 0 {
+		return 3
+	}
+	if v.Lockdown || v.LockdownUnattendedOK {
+		return 2 // v1 has no lockdown fields; writing v1 would silently drop them
+	}
 	for _, p := range v.Projects {
 		if len(p.Envs) != 1 {
 			return 2
@@ -161,12 +178,34 @@ func unmarshalAndMigrate(plain []byte) (*Vault, error) {
 		return v, nil
 	}
 
+	if head.Version == 2 {
+		var old v2Vault
+		if err := json.Unmarshal(plain, &old); err != nil {
+			return nil, fmt.Errorf("vault decrypted but is unreadable: %w", err)
+		}
+		if old.Projects == nil {
+			old.Projects = make(map[string]*project.Project)
+		}
+		return &Vault{
+			Version:              schemaVersion,
+			Projects:             old.Projects,
+			CreatedAt:            old.CreatedAt,
+			Lockdown:             old.Lockdown,
+			LockdownUnattendedOK: old.LockdownUnattendedOK,
+			TrustedOperations:    make(map[string]*TrustedOperation),
+			loadedVersion:        2,
+		}, nil
+	}
+
 	var v Vault
 	if err := json.Unmarshal(plain, &v); err != nil {
 		return nil, fmt.Errorf("vault decrypted but is unreadable: %w", err)
 	}
 	if v.Projects == nil {
 		v.Projects = make(map[string]*project.Project)
+	}
+	if v.TrustedOperations == nil {
+		v.TrustedOperations = make(map[string]*TrustedOperation)
 	}
 	v.loadedVersion = v.Version
 	return &v, nil
@@ -180,9 +219,10 @@ func migrateV1(plain []byte) (*Vault, error) {
 		return nil, fmt.Errorf("vault decrypted but is unreadable: %w", err)
 	}
 	out := &Vault{
-		Version:   schemaVersion,
-		Projects:  make(map[string]*project.Project, len(old.Projects)),
-		CreatedAt: old.CreatedAt,
+		Version:           schemaVersion,
+		Projects:          make(map[string]*project.Project, len(old.Projects)),
+		TrustedOperations: make(map[string]*TrustedOperation),
+		CreatedAt:         old.CreatedAt,
 	}
 	for name, op := range old.Projects {
 		if op == nil {
@@ -209,6 +249,9 @@ func migrateV1(plain []byte) (*Vault, error) {
 func marshalForVersion(v *Vault, version int) ([]byte, error) {
 	switch version {
 	case 1:
+		if blockers := v.V1Blockers(); len(blockers) > 0 {
+			return nil, fmt.Errorf("vault cannot be represented as schema v1")
+		}
 		out := v1Vault{
 			Version:   1,
 			Projects:  make(map[string]*v1Project, len(v.Projects)),
@@ -228,7 +271,18 @@ func marshalForVersion(v *Vault, version int) ([]byte, error) {
 		}
 		return json.Marshal(out)
 	case 2:
-		v.Version = 2
+		if v.AgentStrict || len(v.TrustedOperations) > 0 {
+			return nil, fmt.Errorf("vault cannot be represented as schema v2 while agent strict state or trusted operations exist")
+		}
+		return json.Marshal(v2Vault{
+			Version:              2,
+			Projects:             v.Projects,
+			CreatedAt:            v.CreatedAt,
+			Lockdown:             v.Lockdown,
+			LockdownUnattendedOK: v.LockdownUnattendedOK,
+		})
+	case 3:
+		v.Version = 3
 		return json.Marshal(v)
 	default:
 		return nil, fmt.Errorf("vault: unknown schema version %d", version)

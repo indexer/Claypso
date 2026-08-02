@@ -208,7 +208,7 @@ func maybeMask(val string, reveal, hint bool) string {
 func stripSensitiveEnv(env []string) []string {
 	out := make([]string, 0, len(env))
 	for _, kv := range env {
-		if isPassphraseAssignment(kv) {
+		if isPassphraseAssignment(kv) || strings.HasPrefix(kv, unattendedRevealEnv+"=") {
 			continue
 		}
 		out = append(out, kv)
@@ -222,5 +222,7 @@ func isPassphraseAssignment(kv string) bool {
 			return true
 		}
 	}
-	return false
+	// The rekey rotation variable is just as much a credential as the
+	// current passphrase — never pass it to `pull -- cmd` children either.
+	return strings.HasPrefix(kv, newPassphraseEnv+"=")
 }

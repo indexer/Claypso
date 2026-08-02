@@ -159,6 +159,24 @@ func TestWriteEnvFileAtomicNoTemp(t *testing.T) {
 	}
 }
 
+func TestWriteStrictEnvFileContainsNoCredentialMaterial(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := WriteStrictEnvFile(path); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if strings.Contains(content, "=") || strings.Contains(content, "TOKEN") || strings.Contains(content, "secret") {
+		t.Fatal("strict sentinel contains credential-like material")
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatal("strict sentinel must be owner-only")
+	}
+}
+
 func TestAtomicWriteFileCleansTempOnRenameFailure(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, ".env")

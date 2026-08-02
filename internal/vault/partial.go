@@ -20,7 +20,7 @@ const partialKind = "project"
 // It's wrapped in the same crypto envelope as a full vault (Argon2id +
 // secretbox) so the passphrase requirement is identical. The Kind
 // discriminator lets Import auto-detect partial vs full blobs without
-// any out-of-band signalling — we simply try v1/v2 parsing first and fall
+// any out-of-band signalling — we simply try full-vault parsing first and fall
 // back to partial on failure.
 type partialEnvelope struct {
 	Kind       string           `json:"kind"`    // always partialKind today

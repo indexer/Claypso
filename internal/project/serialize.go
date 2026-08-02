@@ -46,6 +46,13 @@ func SerializeExampleEnv(vars []Var) string {
 	return serialize(header, vars, func(Var) string { return "" })
 }
 
+// SerializeStrictEnv intentionally contains neither variable names nor values.
+// Agent strict mode uses it to sanitize any previously materialized registered
+// .env before the strict vault flag becomes active.
+func SerializeStrictEnv() string {
+	return "# Managed by calypso. Agent strict mode — credentials are available only through trusted operations.\n"
+}
+
 // ReadEnvFile reads and parses a .env file.
 func ReadEnvFile(path string) ([]Var, error) {
 	data, err := os.ReadFile(path)
@@ -86,4 +93,9 @@ func WriteSafeEnvFile(path string, vars []Var) error {
 // template holds no secrets, so it is intentionally world-readable (0o644).
 func WriteExampleEnvFile(path string, vars []Var) error {
 	return atomicWriteFile(path, []byte(SerializeExampleEnv(vars)), 0o644)
+}
+
+// WriteStrictEnvFile replaces a registered .env with a name-free sentinel.
+func WriteStrictEnvFile(path string) error {
+	return atomicWriteFile(path, []byte(SerializeStrictEnv()), 0o600)
 }

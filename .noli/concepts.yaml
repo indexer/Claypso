@@ -1,0 +1,504 @@
+# Structured concept inputs — the single source of truth for the knowledge
+# bundle. Add or edit concepts here, then run:
+#   noli generate --config noli.yaml --apply --format json
+concepts:
+  - type: Architecture Decision
+    title: Adopt OKF Project Knowledge
+    description: Agent-facing knowledge lives in OKF Markdown documents.
+    sections:
+      - heading: Decision
+        content: >-
+          Project knowledge is authored in .noli/concepts.yaml and rendered
+          into knowledge/ by the Noli CLI. Coding agents retrieve it through
+          noli retrieve instead of reading files directly.
+
+  - type: Domain Entity
+    title: Vault
+    description: Single encrypted file holding every project's environment variables.
+    sections:
+      - heading: Definition
+        content: >-
+          The vault is one encrypted blob at ~/.calypso/vault.enc containing
+          all projects, their environments, and their variables. It is always
+          encrypted at rest (Argon2id key derivation + NaCl secretbox), written
+          atomically (.tmp then rename, fsync'd), guarded by flock(2) advisory
+          locking, and auto-backed up to <vault>.backups/ on every successful
+          save (retention via CALYPSO_BACKUP_RETAIN, default 10). Schema v3
+          additionally stores Agent Strict Mode and encrypted Trusted
+          Operation definitions; v1/v2 vaults migrate in memory and upgrade
+          only when v3-only state is saved.
+    relationships:
+      - predicate: enforced-by
+        to: Vault Encryption Scheme
+
+  - type: Domain Entity
+    title: Project Environment
+    description: Named environment (dev/prod/staging) inside a project, each mapped to its own .env path.
+    sections:
+      - heading: Definition
+        content: >-
+          A project holds one or more environments addressed as name@env
+          (bare name means the invisible "default" env when only one exists).
+          Every variable-touching command (set, get, unset, push, pull, diff,
+          remove, drift) accepts the name@env spec. env copy deep-copies all
+          variables from one env to another.
+    relationships:
+      - predicate: depends-on
+        to: Vault
+
+  - type: Domain Entity
+    title: Environment Variable
+    description: KEY=value secret stored in the vault; masked by default everywhere it is displayed.
+    sections:
+      - heading: Definition
+        content: >-
+          Parsed from .env files (export prefix, quotes, multiline, escapes,
+          comments handled). Values are held in memguard enclaves in memory
+          (project.Secret) and displayed masked unless --reveal is passed.
+    relationships:
+      - predicate: depends-on
+        to: Project Environment
+      - predicate: enforced-by
+        to: Mask By Default
+
+  - type: Business Rule
+    title: Mask By Default
+    description: Real secret values are never printed unless the user explicitly asks with --reveal.
+    sections:
+      - heading: Rule
+        content: >-
+          get and diff mask values (first 2 + last 2 chars, or fixed-width
+          asterisks); --reveal is required to see real values; --hint shows
+          edge characters only. The dashboard binds 127.0.0.1 and never shows
+          values. This is the primary defense against secrets leaking into
+          AI-agent transcripts, screenshots, and logs.
+    relationships:
+      - predicate: applies-to
+        to: Environment Variable
+
+  - type: Business Rule
+    title: LLM Safe Mode
+    description: .env on disk can be masked so AI coding agents see key names but never real values.
+    sections:
+      - heading: Rule
+        content: >-
+          calypso pull <spec> --safe writes the .env with **** placeholders
+          (keys visible, values masked) before an LLM session; plain pull
+          restores real values afterwards. calypso pull <spec> -- cmd writes
+          real values, runs cmd, then ALWAYS overwrites .env with ****
+          placeholders even on failure (wipe mode, process-group aware).
+      - heading: Enforcement boundary
+        content: >-
+          Three in-binary layers back this up: the Reveal Gate (reveal-class
+          ops need an interactive TTY or CALYPSO_UNATTENDED=1), Lockdown Mode
+          (vault-stored flag blocking reveal-class ops entirely), and Output
+          Scrubbing (child stdout/stderr filtered in pull -- cmd runs).
+          This is compatibility-mode accidental-leak protection, not strict
+          agent isolation: arbitrary commands receiving real secrets can
+          exfiltrate them. Agent Strict Mode closes that path by refusing
+          every arbitrary secret-bearing command and permitting only
+          brokered Trusted Operations.
+    relationships:
+      - predicate: applies-to
+        to: Environment Variable
+      - predicate: uses
+        to: Pull Workflow
+      - predicate: enforced-by
+        to: Reveal Gate
+      - predicate: enforced-by
+        to: Lockdown Mode
+      - predicate: enforced-by
+        to: Output Scrubbing
+      - predicate: enforced-by
+        to: Agent Strict Mode
+
+  - type: Business Rule
+    title: Reveal Gate
+    description: Reveal-class commands require an interactive terminal or explicit CALYPSO_UNATTENDED=1.
+    sections:
+      - heading: Rule
+        content: >-
+          get --reveal, diff --reveal, drift --reveal, plain pull (real values
+          to disk), export, and vault export-project call guardReveal
+          (cmd/calypso/revealgate.go). When stdin is not a TTY the command
+          fails unless CALYPSO_UNATTENDED=1 is set (CI escape hatch). Headless
+          AI agents therefore cannot reveal by default. Masked ops (list, get,
+          pull --safe, pull -- cmd, drift counts, gaps) are never gated.
+    relationships:
+      - predicate: applies-to
+        to: Environment Variable
+
+  - type: Business Rule
+    title: Lockdown Mode
+    description: Vault-stored flag that disables reveal-class commands regardless of TTY or env vars.
+    sections:
+      - heading: Rule
+        content: >-
+          Vault.Lockdown (JSON field, schema v2 only) is toggled by
+          calypso lockdown on/off/status. "on" works with any unlock method.
+          "off" deliberately ignores the keychain and CALYPSO_PASSPHRASE — it
+          requires the master passphrase typed at an interactive TTY, proving
+          a human is present. While on, guardReveal rejects reveal-class ops
+          even with CALYPSO_UNATTENDED=1; pull --safe and pull -- cmd (with
+          scrubbing) keep working so agents stay productive. vault downgrade
+          to schema v1 is blocked while lockdown is on. Deploy exemption:
+          `lockdown on --allow-unattended` (Vault.LockdownUnattendedOK) keeps
+          reveal-class ops working only where CALYPSO_UNATTENDED=1 is set —
+          for CI vault copies; it weakens lockdown to reveal-gate strength
+          for any process willing to set that variable. vault rekey is
+          hard-blocked under lockdown regardless of the exemption.
+    relationships:
+      - predicate: applies-to
+        to: Vault
+      - predicate: depends-on
+        to: Reveal Gate
+
+  - type: Business Rule
+    title: Output Scrubbing
+    description: Child stdout/stderr in compatibility pull -- cmd runs is filtered; secret values become a name-free <concealed> marker.
+    sections:
+      - heading: Rule
+        content: >-
+          wipeAndRun wraps the child's stdout/stderr in a streaming
+          scrubWriter (cmd/calypso/scrub.go) that replaces every occurrence
+          of a vault value (length >= 4) with <concealed>, holding back
+          up to maxLen-1 bytes across write boundaries so split values are
+          still caught. On by default. --no-scrub is an unsafe reveal-class
+          option requiring a human TTY and is blocked by Lockdown and Agent
+          Strict Mode. pull --inject skips writing the real .env entirely
+          and passes values only via the child process environment, but the
+          whole arbitrary-command workflow is blocked by Agent Strict Mode.
+    relationships:
+      - predicate: applies-to
+        to: Pull Workflow
+
+  - type: Business Rule
+    title: Vault Encryption Scheme
+    description: Argon2id (64 MB, 3 iterations, 4 threads) key derivation plus NaCl secretbox authenticated encryption.
+    sections:
+      - heading: Rule
+        content: >-
+          Fresh salt and nonce on every save; no key reuse. Derived key held
+          in memguard locked memory (mlock'd, guarded, wiped). Core dumps and
+          ptrace disabled at startup so secrets cannot reach disk. Vault and
+          .env files written with 0600 permissions. Exports and auto-backups
+          are byte-identical encrypted blobs requiring the master passphrase.
+    relationships:
+      - predicate: applies-to
+        to: Vault
+
+  - type: Business Rule
+    title: Passphrase Handling
+    description: Master passphrase is the single key; read without echo, zeroed after use, never recoverable.
+    sections:
+      - heading: Rule
+        content: >-
+          Prompted in terminal raw mode without echo, SIGINT-safe, zeroed in
+          memory after every operation, 3 retries with increasing delay.
+          Non-interactive use: CALYPSO_PASSPHRASE env var (legacy
+          ENVHUB_PASSPHRASE honored with deprecation warning); when set it
+          bypasses the keychain entirely. OS keychain (macOS security /
+          Linux secret-tool) can cache the passphrase — this moves the
+          security boundary to the OS user account: any process running as
+          the user can read it. Rotation: `vault rekey` re-encrypts under a
+          new passphrase (interactive double-prompt, or CALYPSO_NEW_PASSPHRASE
+          plus CALYPSO_UNATTENDED=1 for CI); keeps <vault>.pre-rekey.bak
+          (old passphrase), refreshes the keychain entry in interactive runs,
+          and old auto-backups/exports still need the old passphrase.
+          CALYPSO_NEW_PASSPHRASE is stripped from pull -- cmd children like
+          the other passphrase vars.
+    relationships:
+      - predicate: applies-to
+        to: Vault
+      - predicate: uses
+        to: Keychain Component
+
+  - type: Application Component
+    title: CLI Component
+    description: Cobra-based CLI in cmd/calypso with 20+ commands.
+    sections:
+      - heading: Responsibility
+        content: >-
+          Commands grouped in commands_*.go files (crud, vars, ops, analysis,
+          drift, env, keychain, transfer, vault, backups, verify). openVault
+          in helpers tries keychain first, then CALYPSO_PASSPHRASE, then
+          prompts. harden_linux.go disables core dumps/ptrace at startup;
+          wipe_procgroup_*.go implements the pull -- cmd shred path.
+    relationships:
+      - predicate: uses
+        to: Vault Component
+      - predicate: uses
+        to: Keychain Component
+
+  - type: Application Component
+    title: Vault Component
+    description: internal/vault — encrypted vault, environments, file locking, backups.
+    sections:
+      - heading: Responsibility
+        content: >-
+          Loads/saves the encrypted vault via internal/crypto, enforces atomic
+          fsync'd writes, flock(2) via internal/lockfile, and auto-backups.
+          internal/project parses/serializes .env (multiline aware) and holds
+          values as memguard-backed project.Secret. internal/analysis provides
+          diff, gaps, and drift; internal/dashboard serves the read-only,
+          value-free web overview on 127.0.0.1.
+    relationships:
+      - predicate: enforced-by
+        to: Vault Encryption Scheme
+
+  - type: Application Component
+    title: Keychain Component
+    description: internal/keychain — macOS Keychain (security) and Linux libsecret (secret-tool) backends.
+    sections:
+      - heading: Responsibility
+        content: >-
+          Stores only the master passphrase, never env values. keychain
+          save/status/forget manage it. On wrong stored passphrase calypso
+          forgets the entry and falls back to prompting. Windows unsupported;
+          use CALYPSO_PASSPHRASE. Purpose: unattended agents and scripts can
+          run calypso without a TTY prompt that would hang them.
+    relationships:
+      - predicate: depends-on
+        to: Passphrase Handling
+
+  - type: Workflow
+    title: Pull Workflow
+    description: Export vault to .env in one of three modes — real, safe (masked), or wipe (run command then shred).
+    sections:
+      - heading: Steps
+        content: >-
+          1) pull <spec> writes real values to the env's path. 2) pull --safe
+          writes **** placeholders with a "Managed by calypso. Safe mode"
+          header. 3) pull <spec> -- cmd writes real values, executes cmd, and
+          always overwrites the .env with masked placeholders afterwards,
+          even on command failure. 4) pull --example writes empty values for
+          a committable .env.example.
+    relationships:
+      - predicate: uses
+        to: Vault Component
+
+  - type: Business Rule
+    title: Exposure Check
+    description: calypso exposure warns when a .env holds real vault values on disk longer than a threshold.
+    sections:
+      - heading: Rule
+        content: >-
+          A key is "hot" when its on-disk value equals the vault's real value
+          and is at least 4 bytes; placeholders, empty, and rotated values
+          never count. Age comes from the file's mtime. Exit is non-zero when
+          any env has been hot for at least --max-age (default 30m), making it
+          cron/CI usable like drift. --fix rewrites hot files with masked
+          values, but refuses when the disk holds unsynced local edits unless
+          --force is given. Plain pull prints a reminder nudge to stderr.
+    relationships:
+      - predicate: applies-to
+        to: Environment Variable
+      - predicate: depends-on
+        to: LLM Safe Mode
+
+  - type: Application Component
+    title: Agent Config Generator
+    description: calypso agent init writes agent-tool deny rules (claude-code, codex, opencode).
+    sections:
+      - heading: Responsibility
+        content: >-
+          cmd/calypso/commands_agent.go. claude-code: merges deny/allow Bash
+          prefix rules into .claude/settings.json (or ~/.claude/settings.json
+          with --global), denying owner/compatibility commands, unattended
+          bypasses, and keychain readers while allowing broker invocation and
+          metadata. opencode receives equivalent deny globs. codex has no
+          per-command deny, so it receives an advisory AGENTS.md policy
+          permitting only broker invocation and metadata plus a
+          shell_environment_policy snippet excluding every passphrase and
+          unattended variable. All writers merge and dedupe. Agent Strict
+          Mode and OS-separated broker deployment remain the boundary.
+    relationships:
+      - predicate: depends-on
+        to: Reveal Gate
+      - predicate: depends-on
+        to: Lockdown Mode
+      - predicate: depends-on
+        to: Agent Strict Mode
+      - predicate: uses
+        to: Operation Broker
+
+  - type: Business Rule
+    title: Audit Log
+    description: Reveal-class and control operations append hash-chained events to <vault>.audit.log.
+    sections:
+      - heading: Rule
+        content: >-
+          internal/audit. Every gate decision (get/diff/drift --reveal, plain
+          pull, exports, sync, rekey) and control op (lockdown on/off) appends
+          a JSON line recording time, op, project@env, key count, outcome
+          (ok/denied), user, parent process name, TTY and CALYPSO_UNATTENDED
+          state. Values and passphrases are never logged. Lines form a SHA-256
+          hash chain (each event carries prev + hash); calypso audit verify
+          walks it and reports the first break. File lives next to the vault
+          (<vault>.audit.log, 0600), appends are flock-guarded, failures warn
+          but never block the operation. CALYPSO_AUDIT=0 disables. Denied
+          attempts are logged too — an agent probing --reveal leaves a trace.
+          Strict denials and trusted-operation/broker runs record only opaque
+          operation IDs, never labels, endpoints, secret names, or values.
+    relationships:
+      - predicate: applies-to
+        to: Vault
+      - predicate: depends-on
+        to: Reveal Gate
+
+  - type: Application Component
+    title: Platform Sync
+    description: calypso sync fly|vercel|k8s pushes an env's real values into a platform secret store.
+    sections:
+      - heading: Responsibility
+        content: >-
+          cmd/calypso/commands_sync.go. Shells out to the platform CLI —
+          flyctl secrets import (KEY=VALUE lines on stdin), vercel env add
+          (one call per key, value on stdin, --force upsert), kubectl apply
+          -f - (Secret manifest built in memory, values base64). Real values
+          never touch disk or argv. Child stdout/stderr run through the
+          scrubber so a CLI echoing a value prints <concealed>. Passphrase
+          env vars are stripped from the child. Reveal-class gated (lockdown
+          --allow-unattended exemption applies, fitting CI) and audited.
+          --dry-run prints masked payload. Fly values containing newlines are
+          rejected (line format cannot carry them); k8s names are RFC-1123
+          sanitized (lowercase, _ becomes -).
+    relationships:
+      - predicate: depends-on
+        to: Reveal Gate
+      - predicate: uses
+        to: Output Scrubbing
+      - predicate: uses
+        to: Vault Component
+
+  - type: Workflow
+    title: Push Workflow
+    description: Import an on-disk .env into the vault with a diff summary and confirmation.
+    sections:
+      - heading: Steps
+        content: >-
+          push <spec> parses the .env, shows +added/~changed/-removed/=unchanged
+          counts, asks "Overwrite vault values with .env? [y/N]" (skippable
+          with --force), then saves. calypso drift detects when .env was
+          edited outside calypso (non-zero exit on drift, usable as CI guard).
+    relationships:
+      - predicate: uses
+        to: Vault Component
+
+  - type: Domain Entity
+    title: Trusted Operation
+    description: Owner-configured, opaque HTTP operation that binds one vault secret to a fixed request without exposing the secret name or value to an agent.
+    sections:
+      - heading: Definition
+        content: >-
+          A Trusted Operation has a random opaque ID, an owner-facing label,
+          a fixed project@env reference, HTTPS endpoint, HTTP method, secret
+          key binding, destination header, optional non-secret prefix, expected
+          status codes, and timeout. The definition lives only inside schema
+          v3 of the encrypted vault. Agents may invoke an operation by opaque
+          ID but cannot supply a URL, method, header, secret key, request body,
+          or arbitrary command at run time.
+    relationships:
+      - predicate: depends-on
+        to: Project Environment
+      - predicate: enforced-by
+        to: Agent Strict Mode
+
+  - type: Business Rule
+    title: Agent Strict Mode
+    description: Vault-stored state that blocks every path exposing credential names or values to agent-controlled files, output, commands, or configuration.
+    sections:
+      - heading: Rule
+        content: >-
+          `calypso strict on` stores AgentStrict in the encrypted vault and is
+          safe to enable headlessly. Disabling it requires the master
+          passphrase entered directly at a TTY. While enabled, owner and
+          compatibility commands are rejected centrally after vault open:
+          set/get/unset, push/pull, diff/gaps/drift/exposure/dashboard,
+          imports/exports/backups, sync, rekey/downgrade, and Trusted Operation
+          mutation. Allowed commands are metadata-only list/status/audit plus
+          Trusted Operation invocation and broker serving. Strict mode is
+          schema v3-only and blocks downgrade so an older representation can
+          never silently discard the boundary. Before activation, every
+          readable registered .env is checked for unsynced edits and replaced
+          atomically with a name-free strict sentinel; activation refuses
+          rather than overwrite unsynced work. AgentStrict requires hard
+          Lockdown without an unattended exemption.
+      - heading: Confidentiality boundary
+        content: >-
+          Strict mode never places vault variables in an agent-controlled
+          environment or .env file. Brokered operations execute fixed HTTP
+          requests inside Calypso's hardened, non-dumpable process and return
+          only operation ID, success/failure, HTTP status, and duration. Secret
+          key names, values, upstream headers, response bodies, redirects, and
+          transport error details are never returned.
+    relationships:
+      - predicate: applies-to
+        to: Vault
+      - predicate: depends-on
+        to: Lockdown Mode
+      - predicate: enforced-by
+        to: Operation Broker
+
+  - type: Application Component
+    title: Operation Broker
+    description: Hardened in-process executor and loopback HTTP capability service for Trusted Operations.
+    sections:
+      - heading: Responsibility
+        content: >-
+          internal/operation validates and executes fixed HTTP operations with
+          redirects disabled, bounded timeouts, fixed destinations, no raw
+          response output, and generic errors. cmd/calypso/commands_operation.go
+          manages definitions outside strict mode and invokes them directly.
+          cmd/calypso/commands_broker.go serves only opaque operation
+          invocation endpoints on 127.0.0.1, authenticated by a random
+          capability token written to an owner-selected connection file (0600
+          by default, or explicit 0640 for a dedicated shared group). Serving
+          requires an explicit operation-ID allowlist; a connection capability
+          cannot invoke other vault operations.
+          The broker is intended to run under an OS identity that can read the
+          vault while the coding agent can access only the constrained broker.
+    relationships:
+      - predicate: uses
+        to: Vault Component
+      - predicate: uses
+        to: Trusted Operation
+
+  - type: Workflow
+    title: Brokered Operation Workflow
+    description: An agent invokes an opaque capability while Calypso alone resolves and uses the bound credential.
+    sections:
+      - heading: Steps
+        content: >-
+          1) The owner configures and validates a Trusted Operation before
+          enabling strict mode. 2) The owner enables Agent Strict Mode and
+          starts the broker outside the agent security domain. 3) The agent
+          submits only an opaque operation ID with the broker capability
+          token. 4) Calypso resolves the encrypted definition and secret,
+          performs the fixed request with redirects disabled, drains and
+          discards a bounded response body, and returns a schema-limited
+          result. 5) The audit log records the opaque operation ID and outcome,
+          never its credential binding.
+    relationships:
+      - predicate: uses
+        to: Operation Broker
+      - predicate: follows
+        to: Agent Strict Mode
+
+  - type: Architecture Decision
+    title: Broker Secrets Instead of Injecting Agent Commands
+    description: Strict agent isolation uses fixed broker operations because output filtering cannot secure a secret already delivered to agent-controlled code.
+    sections:
+      - heading: Decision
+        content: >-
+          Preserve pull -- cmd and pull --inject as compatibility workflows,
+          but refuse them in Agent Strict Mode. Production agent workflows use
+          built-in fixed-destination HTTP operations and a constrained broker.
+          Output scrubbing remains defense in depth only. Deployments must put
+          the broker and vault in an OS security domain unavailable to the
+          coding agent; AGENTS.md policy is guidance, not the boundary.
+    relationships:
+      - predicate: applies-to
+        to: Agent Strict Mode
+      - predicate: uses
+        to: Operation Broker

@@ -14,6 +14,15 @@ import (
 // One entry per affected project so the caller can show all blockers at once.
 func (v *Vault) V1Blockers() []string {
 	var out []string
+	if v.Lockdown {
+		out = append(out, "vault: lockdown is on (v1 cannot represent it); run `calypso lockdown off` first")
+	}
+	if v.AgentStrict {
+		out = append(out, "vault: agent strict mode is on (v1 cannot represent it); run `calypso strict off` first")
+	}
+	if len(v.TrustedOperations) > 0 {
+		out = append(out, fmt.Sprintf("vault: has %d trusted operation(s) (v1 cannot represent them)", len(v.TrustedOperations)))
+	}
 	for _, name := range v.Names() {
 		p := v.Projects[name]
 		if len(p.Envs) > 1 {

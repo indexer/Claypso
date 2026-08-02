@@ -23,11 +23,18 @@ func diffCmd() *cobra.Command {
 		Short: "Compare two environments (same or different projects)",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			v, pw, err := openVault(cmd.Context())
+			v, pw, err := openOwnerVault(cmd.Context(), "diff")
 			if err != nil {
 				return err
 			}
 			clearBytes(pw)
+			if reveal {
+				err := guardReveal(v.Lockdown, v.LockdownUnattendedOK, "diff --reveal")
+				recordAudit("diff-reveal", args[0]+" "+args[1], 0, err)
+				if err != nil {
+					return err
+				}
+			}
 			entries, err := analysis.Diff(v, args[0], args[1])
 			if err != nil {
 				return err
@@ -62,7 +69,7 @@ func gapsCmd() *cobra.Command {
 		Use:   "gaps",
 		Short: "Find keys that some envs have but others are missing",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			v, pw, err := openVault(cmd.Context())
+			v, pw, err := openOwnerVault(cmd.Context(), "gaps")
 			if err != nil {
 				return err
 			}
@@ -117,7 +124,7 @@ func dashboardCmd() *cobra.Command {
 		Use:   "dashboard",
 		Short: "Open a localhost web view of all environments",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			v, pw, err := openVault(cmd.Context())
+			v, pw, err := openOwnerVault(cmd.Context(), "dashboard")
 			if err != nil {
 				return err
 			}

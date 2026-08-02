@@ -65,6 +65,9 @@ left in place.
 Use 'vault backups list' to see available names.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := guardExistingOwner(cmd.Context(), "vault backups restore"); err != nil {
+				return err
+			}
 			if !force {
 				ok, err := confirmYesNo(os.Stderr,
 					fmt.Sprintf("Restore %q over %s (current vault → %s.pre-restore.bak)?", args[0], vaultPath, vaultPath),

@@ -59,13 +59,53 @@ func Verify(v *Vault) []Finding {
 		p := v.Projects[name]
 		out = append(out, verifyProject(name, p)...)
 	}
+	if v.AgentStrict && (!v.Lockdown || v.LockdownUnattendedOK) {
+		out = append(out, Finding{
+			Severity: "error", Where: "vault",
+			Message: "AgentStrict requires hard Lockdown without an unattended exemption", Fixable: true,
+		})
+	}
+	for id, op := range v.TrustedOperations {
+		if op == nil {
+			out = append(out, Finding{Severity: "error", Where: "operation:" + id, Message: "nil trusted operation"})
+			continue
+		}
+		if op.ID != id {
+			out = append(out, Finding{
+				Severity: "error", Where: "operation:" + id,
+				Message: "operation ID does not match its map key",
+			})
+		}
+		if err := ValidateTrustedOperation(op); err != nil {
+			out = append(out, Finding{
+				Severity: "error", Where: "operation:" + id,
+				Message: "trusted operation policy is invalid",
+			})
+			continue
+		}
+		_, env, err := v.ResolveEnv(op.Spec)
+		if err != nil {
+			out = append(out, Finding{
+				Severity: "error", Where: "operation:" + id,
+				Message: "trusted operation environment is unavailable",
+			})
+			continue
+		}
+		if _, ok := env.Get(op.SecretKey); !ok {
+			out = append(out, Finding{
+				Severity: "error", Where: "operation:" + id,
+				Message: "trusted operation credential is unavailable",
+			})
+		}
+	}
 
-	// Hold-the-line cross-check: if the in-memory shape can only be v2 but
-	// the file we loaded claimed v1, there's a state-tracking bug.
-	if v.loadedVersion == 1 && v.inferOnDiskVersion() == 2 {
+	// Hold-the-line cross-check: if the in-memory shape requires a newer
+	// schema than the file we loaded, the next save must upgrade it.
+	requiredVersion := v.inferOnDiskVersion()
+	if v.loadedVersion > 0 && v.loadedVersion < requiredVersion {
 		out = append(out, Finding{
 			Severity: "warning", Where: "vault",
-			Message: "loadedVersion=1 but current state requires v2 (next save will upgrade)",
+			Message: fmt.Sprintf("loadedVersion=%d but current state requires v%d (next save will upgrade)", v.loadedVersion, requiredVersion),
 		})
 	}
 
@@ -177,6 +217,11 @@ func Repair(v *Vault) []string {
 	if v.CreatedAt == "" {
 		v.CreatedAt = stamp
 		applied = append(applied, "vault: set CreatedAt")
+	}
+	if v.AgentStrict && (!v.Lockdown || v.LockdownUnattendedOK) {
+		v.Lockdown = true
+		v.LockdownUnattendedOK = false
+		applied = append(applied, "vault: restored hard lockdown required by AgentStrict")
 	}
 
 	for _, name := range v.Names() {

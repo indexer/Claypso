@@ -28,11 +28,13 @@ func calypsoPath(t *testing.T) string {
 }
 
 // runCalypso runs the binary with the given args, piping the passphrase via
-// the canonical CALYPSO_PASSPHRASE env var. Returns stdout, stderr, and the
-// run error.
+// the canonical CALYPSO_PASSPHRASE env var. CALYPSO_UNATTENDED=1 is set so
+// reveal-class commands work without a TTY, matching a configured CI
+// environment; tests that exercise the reveal gate itself use runCalypsoEnv
+// directly. Returns stdout, stderr, and the run error.
 func runCalypso(t *testing.T, bin string, passphrase string, args ...string) (string, string, error) {
 	t.Helper()
-	return runCalypsoEnv(t, bin, []string{"CALYPSO_PASSPHRASE=" + passphrase}, args...)
+	return runCalypsoEnv(t, bin, []string{"CALYPSO_PASSPHRASE=" + passphrase, "CALYPSO_UNATTENDED=1"}, args...)
 }
 
 // runCalypsoEnv runs the binary with explicit extra env entries. Any passphrase
@@ -43,7 +45,8 @@ func runCalypsoEnv(t *testing.T, bin string, extraEnv []string, args ...string) 
 	t.Helper()
 	base := make([]string, 0, len(os.Environ()))
 	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "CALYPSO_PASSPHRASE=") || strings.HasPrefix(kv, "ENVHUB_PASSPHRASE=") {
+		if strings.HasPrefix(kv, "CALYPSO_PASSPHRASE=") || strings.HasPrefix(kv, "ENVHUB_PASSPHRASE=") ||
+			strings.HasPrefix(kv, "CALYPSO_UNATTENDED=") {
 			continue
 		}
 		base = append(base, kv)

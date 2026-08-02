@@ -36,6 +36,9 @@ func keychainSaveCmd() *cobra.Command {
 		Use:   "save",
 		Short: "Store the master passphrase in the OS keychain",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := guardExistingOwner(cmd.Context(), "keychain save"); err != nil {
+				return err
+			}
 			if !keychain.Available() {
 				return fmt.Errorf("%w", keychain.ErrNotAvailable)
 			}
@@ -58,6 +61,9 @@ func keychainForgetCmd() *cobra.Command {
 		Use:   "forget",
 		Short: "Remove the master passphrase from the OS keychain",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := guardExistingOwner(cmd.Context(), "keychain forget"); err != nil {
+				return err
+			}
 			if err := keychain.Forget(); err != nil {
 				return fmt.Errorf("keychain forget failed: %w", err)
 			}
@@ -76,11 +82,12 @@ func keychainStatusCmd() *cobra.Command {
 				fmt.Println("Keychain backend: not available")
 				return nil
 			}
-			_, err := keychain.Retrieve()
+			stored, err := keychain.Retrieve()
 			if err != nil {
 				fmt.Println("Keychain backend: available, but no passphrase stored")
 				return nil
 			}
+			clearBytes(stored)
 			fmt.Println("Keychain backend: available, passphrase is stored")
 			return nil
 		},

@@ -15,7 +15,7 @@ func setCmd() *cobra.Command {
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			v, pw, err := openVault(ctx)
+			v, pw, err := openOwnerVault(ctx, "set")
 			if err != nil {
 				return err
 			}
@@ -56,7 +56,7 @@ func getCmd() *cobra.Command {
 		Short: "Show variables (masked unless --reveal)",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			v, pw, err := openVault(cmd.Context())
+			v, pw, err := openOwnerVault(cmd.Context(), "get")
 			if err != nil {
 				return err
 			}
@@ -64,6 +64,13 @@ func getCmd() *cobra.Command {
 			_, e, err := v.ResolveEnv(args[0])
 			if err != nil {
 				return err
+			}
+			if reveal {
+				err := guardReveal(v.Lockdown, v.LockdownUnattendedOK, "get --reveal")
+				recordAudit("get-reveal", args[0], len(e.Vars), err)
+				if err != nil {
+					return err
+				}
 			}
 			if len(args) == 2 {
 				val, ok := e.Get(args[1])
@@ -91,7 +98,7 @@ func unsetCmd() *cobra.Command {
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			v, pw, err := openVault(ctx)
+			v, pw, err := openOwnerVault(ctx, "unset")
 			if err != nil {
 				return err
 			}
